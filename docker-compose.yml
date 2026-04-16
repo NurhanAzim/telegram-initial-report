@@ -1,0 +1,10 @@
+services:
+  initial-report-bot:
+    build: .
+    container_name: initial-report-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./runtime:/app/runtime
