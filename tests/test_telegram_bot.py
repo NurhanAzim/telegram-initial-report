@@ -8,15 +8,21 @@ from bot_state import Session
 from report_generator import Issue, ReportData
 from telegram_bot import (
     AUTHOR_OPTIONS,
-    _author_selection_keyboard,
+    AUTHOR_BACK_LABEL,
+    NO_LABEL,
+    YES_LABEL,
+    _author_reply_keyboard,
     _build_output_paths,
     _drafts_keyboard,
     _drafts_text,
     _field_selection_keyboard,
     _issue_selection_keyboard,
+    _match_author_option,
     _parse_callback_data,
+    _remove_reply_keyboard,
     _review_keyboard,
     _review_text,
+    _yes_no_reply_keyboard,
 )
 from draft_store import DraftSummary
 
@@ -26,7 +32,6 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(_parse_callback_data("review:generate"), ("generate", None))
         self.assertEqual(_parse_callback_data("review:menu_fields"), ("menu_fields", None))
         self.assertEqual(_parse_callback_data("review:field:date"), ("select_field", "date"))
-        self.assertEqual(_parse_callback_data("review:author:2"), ("select_author", 2))
         self.assertEqual(_parse_callback_data("review:edit_issue:1"), ("select_edit_issue", 1))
         self.assertEqual(_parse_callback_data("review:delete_issue:2"), ("select_delete_issue", 2))
         self.assertEqual(_parse_callback_data("draft:edit:9"), ("draft_edit", 9))
@@ -81,11 +86,24 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(first_row["callback_data"], "review:field:date")
         self.assertEqual(keyboard["inline_keyboard"][5][0]["text"], "6. Penyedia laporan")
 
-    def test_author_selection_keyboard_uses_name_only(self) -> None:
-        keyboard = _author_selection_keyboard(back_to_review=True)
-        labels = [row[0]["text"] for row in keyboard["inline_keyboard"][:-1]]
+    def test_author_reply_keyboard_uses_name_only(self) -> None:
+        keyboard = _author_reply_keyboard(back_to_review=True)
+        labels = [row[0]["text"] for row in keyboard["keyboard"][:-1]]
         self.assertEqual(labels, [name for name, _ in AUTHOR_OPTIONS])
-        self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "review:author:0")
+        self.assertEqual(keyboard["keyboard"][-1][0]["text"], AUTHOR_BACK_LABEL)
+
+    def test_yes_no_keyboard_and_remove_keyboard(self) -> None:
+        keyboard = _yes_no_reply_keyboard()
+        self.assertEqual(keyboard["keyboard"][0][0]["text"], YES_LABEL)
+        self.assertEqual(keyboard["keyboard"][0][1]["text"], NO_LABEL)
+        self.assertEqual(_remove_reply_keyboard(), {"remove_keyboard": True})
+
+    def test_match_author_option(self) -> None:
+        self.assertEqual(
+            _match_author_option("KHAIRUL ANUAR JOHARI"),
+            ("KHAIRUL ANUAR JOHARI", "TECHNICAL DIRECTOR"),
+        )
+        self.assertIsNone(_match_author_option("UNKNOWN"))
 
     def test_issue_selection_keyboard_uses_numbered_buttons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

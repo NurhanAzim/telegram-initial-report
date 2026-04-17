@@ -58,12 +58,12 @@ python3 telegram_bot.py
    `project_sub_name`: short phase or sub-project name
    `report_title`: short report title
    `report_purpose`: short purpose sentence
-   `report_author`: choose from the provided buttons
+   `report_author`: choose from the keyboard buttons
 3. Send one issue description
 4. Send one or more images for that issue
 5. Send `/done`
-6. Reply `ya` for another issue or `tidak` to open the review step
-7. In review, use the inline buttons:
+6. Use the keyboard buttons `Ya` or `Tidak` to continue or open review
+7. In review, use the inline buttons in the chat:
    `Jana Laporan`
    `Tambah Isu`
    `Edit Butiran` then pick `1-6`
