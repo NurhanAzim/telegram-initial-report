@@ -651,6 +651,7 @@ def _enter_review(client: TelegramBotClient, store: DraftStore, session: Session
     session.edit_field_key = None
     session.edit_issue_index = None
     store.save_session(session)
+    _dismiss_reply_keyboard(client, session.chat_id)
     _show_review(client, store, session)
 
 
@@ -865,6 +866,14 @@ def _match_author_option(text: str) -> tuple[str, str] | None:
         if normalized == name:
             return name, role
     return None
+
+
+def _dismiss_reply_keyboard(client: TelegramBotClient, chat_id: int) -> None:
+    try:
+        result = client.send_message(chat_id, "\u2060", reply_markup=_remove_reply_keyboard())
+        client.delete_message(chat_id, result["message_id"])
+    except Exception:
+        LOGGER.debug("Failed to dismiss reply keyboard for chat %s", chat_id, exc_info=True)
 
 
 def _resolve_draft_by_number(store: DraftStore, chat_id: int, display_number: int) -> tuple[int, DraftSummary] | None:

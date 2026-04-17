@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -87,7 +88,7 @@ class DraftStore:
             "review_message_id": None,
             "workspace": "",
         }
-        with self._connect() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO drafts (
@@ -112,7 +113,7 @@ class DraftStore:
         session.workspace.mkdir(parents=True, exist_ok=True)
         now = _now_iso()
         data = session.data
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 UPDATE drafts
@@ -137,7 +138,7 @@ class DraftStore:
             )
 
     def load_session(self, chat_id: int, draft_id: int) -> Session | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 """
                 SELECT id, chat_id, state_json
@@ -153,7 +154,7 @@ class DraftStore:
         return self._deserialize_session(chat_id=chat_id, draft_id=draft_id, state=state)
 
     def list_drafts(self, chat_id: int, limit: int = 10) -> list[DraftSummary]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT id, chat_id, date, project_name, project_sub_name, updated_at, created_at
@@ -179,7 +180,7 @@ class DraftStore:
         ]
 
     def cancel_draft(self, chat_id: int, draft_id: int) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE drafts SET status = 'cancelled', updated_at = ? WHERE id = ? AND chat_id = ?",
                 (_now_iso(), draft_id, chat_id),
@@ -187,7 +188,7 @@ class DraftStore:
 
     def mark_generated(self, chat_id: int, draft_id: int) -> None:
         now = _now_iso()
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 UPDATE drafts
@@ -204,7 +205,7 @@ class DraftStore:
         share_id: str | None,
         share_url: str,
     ) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO generated_files (
@@ -215,7 +216,7 @@ class DraftStore:
             )
 
     def list_expired_generated_files(self, cutoff_iso: str) -> list[GeneratedFileRecord]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT id, draft_id, remote_path, share_id, share_url, created_at
@@ -239,7 +240,7 @@ class DraftStore:
         ]
 
     def mark_generated_file_deleted(self, record_id: int) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 "UPDATE generated_files SET deleted_at = ? WHERE id = ?",
                 (_now_iso(), record_id),
@@ -303,12 +304,24 @@ class DraftStore:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _connection(self) -> sqlite3.Connection:
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def _migrate(self) -> None:
         pending = self._pending_migrations()
         if pending and self.db_path.exists() and self.db_path.stat().st_size > 0:
             self._backup_database()
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -336,7 +349,7 @@ class DraftStore:
         if not self.db_path.exists() or self.db_path.stat().st_size == 0:
             return set()
 
-        with self._connect() as connection:
+        with self._connection() as connection:
             table = connection.execute(
                 """
                 SELECT name
