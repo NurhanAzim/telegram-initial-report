@@ -41,7 +41,10 @@ python3 -m pip install -r requirements.txt
 - Optional: `RUNTIME_DIR`
 - Optional: `DATABASE_PATH`
 - Optional: `DRAFTS_DIR`
+- Optional: `BACKUP_DIR`
 - Optional: `RETENTION_PERIOD_DAYS`
+
+For staging, copy `.env.staging.example` to `.env.staging` or edit the existing local `.env.staging`.
 
 4. Start the bot:
 
@@ -90,7 +93,15 @@ help - Tunjuk panduan ringkas
 
 - Drafts are stored in SQLite at `DATABASE_PATH`
 - Saved draft assets are stored under `DRAFTS_DIR`
+- Database backups are stored under `BACKUP_DIR`
 - Generated Nextcloud PDFs older than `RETENTION_PERIOD_DAYS` are deleted automatically
+
+## Migrations
+
+- SQLite schema migrations are tracked in the `schema_migrations` table
+- Pending migrations are applied automatically on startup
+- If a non-empty database needs migration, the app creates a backup in `BACKUP_DIR` first
+- Draft JSON state loading is backward-compatible for missing keys via defaults in the loader
 
 ## Docker
 
@@ -100,10 +111,32 @@ Build and run with Docker Compose:
 docker compose up -d --build
 ```
 
+Run staging with the separate staging bot token and data paths:
+
+```bash
+docker compose -f docker-compose.staging.yml up -d --build
+```
+
 Persistent paths:
 
 - `./data` for SQLite and saved draft assets
 - `./runtime` for runtime scratch files
+- `./data-staging` for staging SQLite and saved draft assets
+- `./runtime-staging` for staging runtime scratch files
+
+## Backup
+
+Manual SQLite backup:
+
+```bash
+./scripts/backup_db.sh
+```
+
+Or specify explicit paths:
+
+```bash
+./scripts/backup_db.sh data/bot.db data/backups
+```
 
 ## Local render test
 

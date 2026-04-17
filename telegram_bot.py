@@ -131,13 +131,15 @@ def main() -> None:
     runtime_dir = Path(os.getenv("RUNTIME_DIR", "runtime")).resolve()
     db_path = Path(os.getenv("DATABASE_PATH", str(data_dir / "bot.db"))).resolve()
     drafts_dir = Path(os.getenv("DRAFTS_DIR", str(data_dir / "drafts"))).resolve()
+    backup_dir = Path(os.getenv("BACKUP_DIR", str(data_dir / "backups"))).resolve()
     retention_days = int(os.getenv("RETENTION_PERIOD_DAYS", "14"))
 
     data_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     drafts_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir.mkdir(parents=True, exist_ok=True)
 
-    store = DraftStore(db_path=db_path, drafts_dir=drafts_dir)
+    store = DraftStore(db_path=db_path, drafts_dir=drafts_dir, backup_dir=backup_dir)
     nextcloud = _load_nextcloud_client()
     client = TelegramBotClient(token)
     client.set_my_commands()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -31,13 +32,47 @@ class GeneratedFileRecord:
     created_at: str
 
 
+SCHEMA_MIGRATIONS: list[tuple[str, str]] = [
+    (
+        "001_init",
+        """
+        CREATE TABLE IF NOT EXISTS drafts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            date TEXT NOT NULL DEFAULT '',
+            project_name TEXT NOT NULL DEFAULT '',
+            project_sub_name TEXT NOT NULL DEFAULT '',
+            state_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            generated_at TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS generated_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            draft_id INTEGER NOT NULL,
+            remote_path TEXT NOT NULL,
+            share_id TEXT,
+            share_url TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            deleted_at TEXT,
+            FOREIGN KEY(draft_id) REFERENCES drafts(id)
+        );
+        """,
+    ),
+]
+
+
 class DraftStore:
-    def __init__(self, db_path: Path, drafts_dir: Path) -> None:
+    def __init__(self, db_path: Path, drafts_dir: Path, backup_dir: Path | None = None) -> None:
         self.db_path = db_path
         self.drafts_dir = drafts_dir
+        self.backup_dir = backup_dir or self.db_path.parent / "backups"
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.drafts_dir.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.backup_dir.mkdir(parents=True, exist_ok=True)
+        self._migrate()
 
     def create_draft(self, chat_id: int) -> Session:
         now = _now_iso()
@@ -268,35 +303,58 @@ class DraftStore:
         connection.row_factory = sqlite3.Row
         return connection
 
-    def _init_schema(self) -> None:
-        with self._connect() as connection:
-            connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS drafts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    chat_id INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    date TEXT NOT NULL DEFAULT '',
-                    project_name TEXT NOT NULL DEFAULT '',
-                    project_sub_name TEXT NOT NULL DEFAULT '',
-                    state_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    generated_at TEXT
-                );
+    def _migrate(self) -> None:
+        pending = self._pending_migrations()
+        if pending and self.db_path.exists() and self.db_path.stat().st_size > 0:
+            self._backup_database()
 
-                CREATE TABLE IF NOT EXISTS generated_files (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    draft_id INTEGER NOT NULL,
-                    remote_path TEXT NOT NULL,
-                    share_id TEXT,
-                    share_url TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    deleted_at TEXT,
-                    FOREIGN KEY(draft_id) REFERENCES drafts(id)
-                );
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TEXT NOT NULL
+                )
                 """
             )
+            for version, sql in pending:
+                connection.executescript(sql)
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (version, _now_iso()),
+                )
+
+    def _pending_migrations(self) -> list[tuple[str, str]]:
+        applied_versions = self._applied_migration_versions()
+        return [
+            (version, sql)
+            for version, sql in SCHEMA_MIGRATIONS
+            if version not in applied_versions
+        ]
+
+    def _applied_migration_versions(self) -> set[str]:
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return set()
+
+        with self._connect() as connection:
+            table = connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'schema_migrations'
+                """
+            ).fetchone()
+            if table is None:
+                return set()
+
+            rows = connection.execute("SELECT version FROM schema_migrations").fetchall()
+        return {row["version"] for row in rows}
+
+    def _backup_database(self) -> Path:
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = self.backup_dir / f"{self.db_path.stem}-{timestamp}.sqlite3"
+        shutil.copy2(self.db_path, backup_path)
+        return backup_path
 
 
 def _now_iso() -> str:

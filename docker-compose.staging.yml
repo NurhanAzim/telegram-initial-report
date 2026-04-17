@@ -1,0 +1,10 @@
+services:
+  initial-report-bot:
+    build: .
+    container_name: initial-report-bot-staging
+    restart: unless-stopped
+    env_file:
+      - .env.staging
+    volumes:
+      - ./data-staging:/app/data-staging
+      - ./runtime-staging:/app/runtime-staging

@@ -1,8 +1,11 @@
 .env
+.env.staging
 .codex
 .omx/
 runtime/
 data/
+runtime-staging/
+data-staging/
 output/
 __pycache__/
 *.pyc
