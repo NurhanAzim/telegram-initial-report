@@ -18,6 +18,7 @@ from docx.text.paragraph import Paragraph
 IMAGE_MAX_HEIGHT = Cm(7)
 ISSUE_DESCRIPTION_TOKEN = "<issue_description>"
 ISSUE_IMAGES_TOKEN = "<issue_images>"
+VERIFIER_NAME = "KHAIRUL ANUAR JOHARI"
 
 
 @dataclass(slots=True)
@@ -33,7 +34,8 @@ class ReportData:
     project_sub_name: str
     report_title: str
     report_purpose: str
-    project_location: str
+    report_author: str
+    report_author_role: str
     issues: list[Issue] = field(default_factory=list)
 
     @classmethod
@@ -51,7 +53,8 @@ class ReportData:
             project_sub_name=payload["project_sub_name"].strip(),
             report_title=payload["report_title"].strip(),
             report_purpose=payload["report_purpose"].strip(),
-            project_location=payload["project_location"].strip(),
+            report_author=payload["report_author"].strip(),
+            report_author_role=payload["report_author_role"].strip(),
             issues=issues,
         )
 
@@ -62,7 +65,8 @@ class ReportData:
             "project_sub_name": self.project_sub_name,
             "report_title": self.report_title,
             "report_purpose": self.report_purpose,
-            "project_location": self.project_location,
+            "report_author": self.report_author,
+            "report_author_role": self.report_author_role,
         }
 
 
@@ -74,6 +78,8 @@ def render_report(
     document = Document(str(template_path))
     _populate_issue_table(document, report.issues)
     _replace_scalar_placeholders(document, report.placeholder_map())
+    if report.report_author == VERIFIER_NAME:
+        _remove_verifier_section(document)
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -122,6 +128,23 @@ def _replace_placeholder_in_paragraph(paragraph: Paragraph, placeholder: str, va
     paragraph.runs[0].text = merged_text
     for run in paragraph.runs[1:]:
         run.text = ""
+
+
+def _remove_verifier_section(document: DocxDocument) -> None:
+    start_index = None
+    for index, paragraph in enumerate(document.paragraphs):
+        if "Laporan Disahkan Oleh:" in paragraph.text:
+            start_index = index
+            break
+
+    if start_index is None:
+        return
+
+    for paragraph in list(document.paragraphs[start_index:]):
+        element = paragraph._element
+        parent = element.getparent()
+        if parent is not None:
+            parent.remove(element)
 
 
 def _populate_issue_table(document: DocxDocument, issues: list[Issue]) -> None:

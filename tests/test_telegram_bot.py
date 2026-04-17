@@ -7,6 +7,8 @@ from pathlib import Path
 from bot_state import Session
 from report_generator import Issue, ReportData
 from telegram_bot import (
+    AUTHOR_OPTIONS,
+    _author_selection_keyboard,
     _build_output_paths,
     _drafts_keyboard,
     _drafts_text,
@@ -24,6 +26,7 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(_parse_callback_data("review:generate"), ("generate", None))
         self.assertEqual(_parse_callback_data("review:menu_fields"), ("menu_fields", None))
         self.assertEqual(_parse_callback_data("review:field:date"), ("select_field", "date"))
+        self.assertEqual(_parse_callback_data("review:author:2"), ("select_author", 2))
         self.assertEqual(_parse_callback_data("review:edit_issue:1"), ("select_edit_issue", 1))
         self.assertEqual(_parse_callback_data("review:delete_issue:2"), ("select_delete_issue", 2))
         self.assertEqual(_parse_callback_data("draft:edit:9"), ("draft_edit", 9))
@@ -39,7 +42,8 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "project_sub_name": "Fasa 1",
                     "report_title": "Bilik Server",
                     "report_purpose": "Pemeriksaan awal",
-                    "project_location": "Petaling Jaya",
+                    "report_author": "MUHAMMAD ADAM BIN JAFFRY",
+                    "report_author_role": "DEVOPS ENGINEER",
                 }
             )
             session.issues = [
@@ -53,6 +57,7 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertIn("1. Tarikh laporan: 16/04/2026", text)
             self.assertIn("1. Kabel belum dirapikan (2 gambar)", text)
             self.assertIn("2. Label rack belum lengkap (0 gambar)", text)
+            self.assertIn("6. Penyedia laporan: MUHAMMAD ADAM BIN JAFFRY", text)
             self.assertIn("Gunakan butang di bawah", text)
 
     def test_review_keyboard_includes_nested_menu_buttons(self) -> None:
@@ -74,6 +79,13 @@ class TelegramBotReviewTest(unittest.TestCase):
         first_row = keyboard["inline_keyboard"][0][0]
         self.assertEqual(first_row["text"], "1. Tarikh laporan")
         self.assertEqual(first_row["callback_data"], "review:field:date")
+        self.assertEqual(keyboard["inline_keyboard"][5][0]["text"], "6. Penyedia laporan")
+
+    def test_author_selection_keyboard_uses_name_only(self) -> None:
+        keyboard = _author_selection_keyboard(back_to_review=True)
+        labels = [row[0]["text"] for row in keyboard["inline_keyboard"][:-1]]
+        self.assertEqual(labels, [name for name, _ in AUTHOR_OPTIONS])
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "review:author:0")
 
     def test_issue_selection_keyboard_uses_numbered_buttons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -113,7 +125,8 @@ class TelegramBotReviewTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Bilik Server",
                 report_purpose="Pemeriksaan awal",
-                project_location="Petaling Jaya",
+                report_author="MUHAMMAD ADAM BIN JAFFRY",
+                report_author_role="DEVOPS ENGINEER",
                 issues=[],
             )
             docx_path, pdf_path = _build_output_paths(session.workspace, payload)

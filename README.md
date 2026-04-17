@@ -58,7 +58,7 @@ python3 telegram_bot.py
    `project_sub_name`: short phase or sub-project name
    `report_title`: short report title
    `report_purpose`: short purpose sentence
-   `project_location`: full site/location text
+   `report_author`: choose from the provided buttons
 3. Send one issue description
 4. Send one or more images for that issue
 5. Send `/done`
@@ -122,7 +122,8 @@ Create a payload JSON:
   "project_sub_name": "Fasa 1",
   "report_title": "Server Room",
   "report_purpose": "Pemeriksaan awal",
-  "project_location": "Petaling Jaya",
+  "report_author": "MUHAMMAD ADAM BIN JAFFRY",
+  "report_author_role": "DEVOPS ENGINEER",
   "issues": [
     {
       "description": "Kabel belum dirapikan",

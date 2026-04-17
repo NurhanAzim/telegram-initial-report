@@ -30,10 +30,17 @@ FIELDS: list[tuple[str, str, str]] = [
     ("project_sub_name", "Sub-projek", "Contoh: Fasa 1"),
     ("report_title", "Tajuk laporan", "Contoh: Pemeriksaan bilik server"),
     ("report_purpose", "Tujuan laporan", "Contoh: Pemeriksaan awal tapak"),
-    ("project_location", "Kawasan / lokasi projek", "Contoh: Petaling Jaya, Selangor"),
+    ("report_author", "Penyedia laporan", "Pilih nama daripada butang yang disediakan"),
 ]
 FIELD_LABELS = {key: label for key, label, _ in FIELDS}
 FIELD_GUIDANCE = {key: guidance for key, _, guidance in FIELDS}
+AUTHOR_OPTIONS: list[tuple[str, str]] = [
+    ("MUHAMMAD ADAM BIN JAFFRY", "DEVOPS ENGINEER"),
+    ("DZAHIRUDDIN BIN DZULKIFLEE", "ASSOCIATE ENGINEER"),
+    ("SYAMSUL RIZAL BIN BAKRI", "SENIOR ENGINEER"),
+    ("ZAILAH BINTI BUANG", "PROJECT EXECUTIVE"),
+    ("KHAIRUL ANUAR JOHARI", "TECHNICAL DIRECTOR"),
+]
 
 BOT_COMMANDS = [
     {"command": "start", "description": "Mula draf baharu"},
@@ -204,6 +211,10 @@ def _handle_update(
         _handle_field_input(client, store, session, text)
         return
 
+    if session.stage == "author_select":
+        client.send_message(chat_id, "Gunakan butang untuk pilih penyedia laporan.")
+        return
+
     if session.stage == "issue_description":
         _handle_issue_description(client, store, session, text)
         return
@@ -222,6 +233,10 @@ def _handle_update(
 
     if session.stage == "edit_field":
         _handle_edit_field(client, store, session, text)
+        return
+
+    if session.stage == "edit_author":
+        client.send_message(chat_id, "Gunakan butang untuk pilih penyedia laporan.")
         return
 
     if session.stage == "edit_issue_description":
@@ -259,6 +274,15 @@ def _handle_field_input(client: TelegramBotClient, store: DraftStore, session: S
         return
 
     key, _, guidance = FIELDS[session.field_index]
+    if key == "report_author":
+        session.stage = "author_select"
+        store.save_session(session)
+        client.send_message(
+            session.chat_id,
+            "Pilih penyedia laporan:",
+            reply_markup=_author_selection_keyboard(back_to_review=False),
+        )
+        return
     if key == "date" and not _is_valid_date(text):
         client.send_message(session.chat_id, f"Tarikh tidak sah. {guidance}")
         return
@@ -268,7 +292,17 @@ def _handle_field_input(client: TelegramBotClient, store: DraftStore, session: S
     store.save_session(session)
 
     if session.field_index < len(FIELDS):
-        client.send_message(session.chat_id, _field_prompt(session.field_index))
+        next_key = FIELDS[session.field_index][0]
+        if next_key == "report_author":
+            session.stage = "author_select"
+            store.save_session(session)
+            client.send_message(
+                session.chat_id,
+                "Pilih penyedia laporan:",
+                reply_markup=_author_selection_keyboard(back_to_review=False),
+            )
+        else:
+            client.send_message(session.chat_id, _field_prompt(session.field_index))
         return
 
     session.stage = "issue_description"
@@ -344,6 +378,18 @@ def _handle_edit_field(client: TelegramBotClient, store: DraftStore, session: Se
         session.stage = "review"
         store.save_session(session)
         _show_review(client, store, session)
+        return
+
+    if field_key == "report_author":
+        session.stage = "edit_author"
+        store.save_session(session)
+        _set_review_message(
+            client,
+            store,
+            session,
+            "Pilih penyedia laporan:",
+            _author_selection_keyboard(back_to_review=True),
+        )
         return
 
     if not text:
@@ -471,6 +517,28 @@ def _handle_callback_query(
         _show_issue_selection_menu(client, store, session, "delete")
         return
 
+    if action == "select_author" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        if value < 0 or value >= len(AUTHOR_OPTIONS):
+            _show_review(client, store, session, prefix="Pilihan penyedia laporan tidak sah.\n\n")
+            return
+        author_name, author_role = AUTHOR_OPTIONS[value]
+        session.data["report_author"] = author_name
+        session.data["report_author_role"] = author_role
+        session.edit_field_key = None
+
+        if session.stage == "author_select":
+            session.field_index = len(FIELDS)
+            session.stage = "issue_description"
+            store.save_session(session)
+            client.send_message(session.chat_id, f"Penyedia laporan dipilih: {author_name}\n\nHantar keterangan isu pertama. Jika tiada isu, balas /done.")
+            return
+
+        session.stage = "review"
+        store.save_session(session)
+        _show_review(client, store, session, prefix=f"Penyedia laporan telah dikemas kini kepada {author_name}.\n\n")
+        return
+
     if action == "select_field" and isinstance(value, str):
         client.answer_callback_query(callback_id)
         session.edit_field_key = value
@@ -540,7 +608,8 @@ def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store:
         project_sub_name=session.data["project_sub_name"],
         report_title=session.data["report_title"],
         report_purpose=session.data["report_purpose"],
-        project_location=session.data["project_location"],
+        report_author=session.data["report_author"],
+        report_author_role=session.data["report_author_role"],
         issues=session.issues,
     )
 
@@ -670,6 +739,16 @@ def _field_selection_keyboard() -> dict:
     return {"inline_keyboard": rows}
 
 
+def _author_selection_keyboard(back_to_review: bool) -> dict:
+    rows = [
+        [_button(name, f"{REVIEW_CALLBACK_PREFIX}:author:{index}")]
+        for index, (name, _) in enumerate(AUTHOR_OPTIONS)
+    ]
+    if back_to_review:
+        rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
+    return {"inline_keyboard": rows}
+
+
 def _show_issue_selection_menu(client: TelegramBotClient, store: DraftStore, session: Session, mode: str) -> None:
     if not session.issues:
         _show_review(client, store, session, prefix="Tiada isu untuk dipilih.\n\n")
@@ -714,6 +793,8 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
             return action, None
         if action == "field" and len(parts) >= 3:
             return "select_field", parts[2]
+        if action == "author" and len(parts) >= 3 and parts[2].isdigit():
+            return "select_author", int(parts[2])
         if action == "edit_issue" and len(parts) >= 3 and parts[2].isdigit():
             return "select_edit_issue", int(parts[2])
         if action == "delete_issue" and len(parts) >= 3 and parts[2].isdigit():
@@ -836,7 +917,7 @@ def _help_text() -> str:
         "- Sub-projek: teks ringkas\n"
         "- Tajuk laporan: teks ringkas\n"
         "- Tujuan laporan: ayat ringkas\n"
-        "- Kawasan / lokasi projek: lokasi penuh\n\n"
+        "- Penyedia laporan: pilih daripada butang nama\n\n"
         "Semakan akhir menggunakan butang, bukan arahan teks."
     )
 

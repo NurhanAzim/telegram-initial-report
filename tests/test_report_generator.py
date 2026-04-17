@@ -37,7 +37,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
-                project_location="Petaling Jaya",
+                report_author="MUHAMMAD ADAM BIN JAFFRY",
+                report_author_role="DEVOPS ENGINEER",
                 issues=[Issue(description="Kabel belum dirapikan", image_paths=[image_path])],
             )
 
@@ -51,7 +52,8 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertIn("Sub-Projek: Fasa 1", full_text)
             self.assertIn("Tajuk: Laporan Server Room", full_text)
             self.assertIn("Tujuan: Pemeriksaan awal", full_text)
-            self.assertIn("Kawasan: Petaling Jaya", full_text)
+            self.assertIn("Nama: \tMUHAMMAD ADAM BIN JAFFRY", full_text)
+            self.assertIn("Jawatan: DEVOPS ENGINEER", full_text)
             self.assertIn("Kabel belum dirapikan", table_text)
             self.assertNotIn("<date>", full_text)
             self.assertNotIn("<issue_description>", table_text)
@@ -72,7 +74,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
-                project_location="Petaling Jaya",
+                report_author="MUHAMMAD ADAM BIN JAFFRY",
+                report_author_role="DEVOPS ENGINEER",
                 issues=[
                     Issue(description="Isu pertama", image_paths=[]),
                     Issue(description="Isu kedua", image_paths=[]),
@@ -105,7 +108,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
-                project_location="Petaling Jaya",
+                report_author="MUHAMMAD ADAM BIN JAFFRY",
+                report_author_role="DEVOPS ENGINEER",
                 issues=[
                     Issue(
                         description="Susun atur imej",
@@ -126,6 +130,30 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertEqual(len(drawing_paragraphs), 2)
             self.assertEqual(drawing_paragraphs[0]._element.xml.count("<pic:pic>"), 2)
             self.assertEqual(drawing_paragraphs[1]._element.xml.count("<pic:pic>"), 1)
+
+    def test_render_report_hides_verifier_section_when_author_is_verifier(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            template = Path("Template Initial Report.docx")
+            output = temp_path / "rendered-verifier.docx"
+
+            report = ReportData(
+                date="16/04/2026",
+                project_name="Projek Demo",
+                project_sub_name="Fasa 1",
+                report_title="Server Room",
+                report_purpose="Pemeriksaan awal",
+                report_author="KHAIRUL ANUAR JOHARI",
+                report_author_role="TECHNICAL DIRECTOR",
+                issues=[],
+            )
+
+            render_report(template, output, report)
+            rendered_doc = Document(str(output))
+            full_text = "\n".join(paragraph.text for paragraph in rendered_doc.paragraphs)
+
+            self.assertIn("Nama: \tKHAIRUL ANUAR JOHARI", full_text)
+            self.assertNotIn("Laporan Disahkan Oleh:", full_text)
 
     def test_nextcloud_share_url_parser(self) -> None:
         client = NextcloudClient(
