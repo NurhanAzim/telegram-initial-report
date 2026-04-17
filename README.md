@@ -72,7 +72,7 @@ python3 telegram_bot.py
    `Edit Butiran` then pick `1-6`
    `Edit Isu` then pick issue number `1..n`
    `Padam Isu` then pick issue number `1..n`
-8. Reopen an unfinished draft later with `/drafts` or `/edit <id>`
+8. Reopen an unfinished draft later with `/drafts` or `/edit <nombor draf>`
 
 If there is no issue at all, send `/done` when the bot asks for the first issue description.
 
@@ -83,7 +83,7 @@ The bot syncs these commands automatically on startup via `setMyCommands`, but i
 ```text
 start - Mula laporan baru
 drafts - Senarai draf belum siap
-edit - Buka draf ikut ID
+edit - Buka draf ikut nombor draf
 done - Selesai untuk langkah semasa
 cancel - Batal sesi semasa
 help - Tunjuk panduan ringkas

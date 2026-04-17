@@ -99,6 +99,9 @@ class TelegramBotClient:
             payload["reply_markup"] = reply_markup
         return self.request("editMessageText", json=payload)
 
+    def delete_message(self, chat_id: int, message_id: int) -> dict:
+        return self.request("deleteMessage", json={"chat_id": chat_id, "message_id": message_id})
+
     def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
         payload = {"callback_query_id": callback_query_id}
         if text:
@@ -188,7 +191,7 @@ def _handle_update(
     if text == "/start":
         session = store.create_draft(chat_id)
         sessions[chat_id] = session
-        client.send_message(chat_id, f"Draf #{session.draft_id} dicipta.\n\n{_field_prompt(0)}")
+        client.send_message(chat_id, f"Draf baharu dicipta.\n\n{_field_prompt(0)}")
         return
 
     if text == "/drafts":
@@ -260,17 +263,23 @@ def _handle_edit_command(
 ) -> None:
     match = re.fullmatch(r"/edit\s+(\d+)", text)
     if not match:
-        client.send_message(chat_id, "Format: /edit <id>. Contoh: /edit 3")
+        client.send_message(chat_id, "Format: /edit <nombor draf>. Contoh: /edit 1")
         return
 
-    draft_id = int(match.group(1))
+    draft_number = int(match.group(1))
+    resolved = _resolve_draft_by_number(store, chat_id, draft_number)
+    if resolved is None:
+        client.send_message(chat_id, f"Draf #{draft_number} tidak dijumpai.")
+        return
+
+    draft_id, _summary = resolved
     session = store.load_session(chat_id, draft_id)
     if session is None:
-        client.send_message(chat_id, f"Draf #{draft_id} tidak dijumpai.")
+        client.send_message(chat_id, f"Draf #{draft_number} tidak dijumpai.")
         return
 
     sessions[chat_id] = session
-    _resume_draft(client, store, session, prefix=f"Draf #{draft_id} dibuka.\n\n")
+    _resume_draft(client, store, session, prefix=f"Draf #{draft_number} dibuka.\n\n")
 
 
 def _handle_field_input(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
@@ -365,7 +374,6 @@ def _handle_author_selection(client: TelegramBotClient, store: DraftStore, sessi
     session.stage = "review"
     session.edit_field_key = None
     store.save_session(session)
-    client.send_message(session.chat_id, "Pilihan penyedia laporan dikemas kini.", reply_markup=_remove_reply_keyboard())
     _show_review(client, store, session, prefix=f"Penyedia laporan telah dikemas kini kepada {author_name}.\n\n")
 
 
@@ -419,7 +427,6 @@ def _handle_more_issues(client: TelegramBotClient, store: DraftStore, session: S
         )
         return
     if normalized in {NO_LABEL.lower(), "tak", "t", "no", "n"}:
-        client.send_message(session.chat_id, "Membuka semakan akhir.", reply_markup=_remove_reply_keyboard())
         _enter_review(client, store, session)
         return
 
@@ -494,13 +501,18 @@ def _handle_callback_query(
     action, value = _parse_callback_data(data)
 
     if action == "draft_edit" and isinstance(value, int):
-        client.answer_callback_query(callback_id, f"Membuka draf #{value}...")
+        draft_number = _draft_display_number(store, chat_id, value)
+        if draft_number is None:
+            client.answer_callback_query(callback_id, "Draf tidak dijumpai.")
+            client.send_message(chat_id, "Draf itu tidak lagi wujud dalam senarai semasa.")
+            return
+        client.answer_callback_query(callback_id, f"Membuka draf #{draft_number}...")
         session = store.load_session(chat_id, value)
         if session is None:
-            client.send_message(chat_id, f"Draf #{value} tidak dijumpai.")
+            client.send_message(chat_id, f"Draf #{draft_number} tidak dijumpai.")
             return
         sessions[chat_id] = session
-        _resume_draft(client, store, session, prefix=f"Draf #{value} dibuka.\n\n")
+        _resume_draft(client, store, session, prefix=f"Draf #{draft_number} dibuka.\n\n")
         return
 
     if action == "draft_list":
@@ -690,13 +702,13 @@ def _show_drafts(client: TelegramBotClient, store: DraftStore, chat_id: int) -> 
 
 def _drafts_text(drafts: list[DraftSummary]) -> str:
     lines = ["Draf belum siap:"]
-    for draft in drafts:
+    for number, draft in enumerate(drafts, start=1):
         project = draft.project_name or "(belum diisi)"
         sub_project = draft.project_sub_name or "-"
         date = draft.date or "-"
-        lines.append(f"#{draft.draft_id} | {project} | {sub_project} | {date}")
+        lines.append(f"#{number} | {project} | {sub_project} | {date}")
     lines.append("")
-    lines.append("Tekan butang Edit atau guna /edit <id>.")
+    lines.append("Tekan butang Edit atau guna /edit <nombor draf>.")
     return "\n".join(lines)
 
 
@@ -706,8 +718,9 @@ def _field_prompt(index: int) -> str:
 
 
 def _review_text(session: Session) -> str:
+    draft_label = _draft_label_for_session(session)
     header_lines = [
-        f"Semakan laporan draf #{session.draft_id}:",
+        f"Semakan laporan {draft_label}:",
         *[
             f"{index}. {label}: {session.data.get(key, '-')}"
             for index, (key, label, _) in enumerate(FIELDS, start=1)
@@ -726,7 +739,21 @@ def _review_text(session: Session) -> str:
 
 
 def _show_review(client: TelegramBotClient, store: DraftStore, session: Session, prefix: str = "") -> None:
-    _set_review_message(client, store, session, f"{prefix}{_review_text(session)}", _review_keyboard(session))
+    session.display_number = _draft_display_number(store, session.chat_id, session.draft_id)
+    old_message_id = session.review_message_id
+    result = client.send_message(
+        session.chat_id,
+        f"{prefix}{_review_text(session)}",
+        reply_markup=_review_keyboard(session),
+    )
+    session.review_message_id = result["message_id"]
+    store.save_session(session)
+
+    if old_message_id and old_message_id != session.review_message_id:
+        try:
+            client.delete_message(session.chat_id, old_message_id)
+        except Exception:
+            LOGGER.debug("Failed to delete previous review message %s", old_message_id, exc_info=True)
 
 
 def _set_review_message(
@@ -784,7 +811,7 @@ def _author_reply_keyboard(back_to_review: bool) -> dict:
     rows = [[{"text": name}] for name, _ in AUTHOR_OPTIONS]
     if back_to_review:
         rows.append([{"text": AUTHOR_BACK_LABEL}])
-    return {"keyboard": rows, "resize_keyboard": True, "one_time_keyboard": False}
+    return {"keyboard": rows, "resize_keyboard": True, "one_time_keyboard": True}
 
 
 def _yes_no_reply_keyboard() -> dict:
@@ -819,7 +846,7 @@ def _issue_selection_keyboard(session: Session, mode: str) -> dict:
 
 
 def _drafts_keyboard(drafts: list[DraftSummary]) -> dict:
-    rows = [[_button(f"Edit #{draft.draft_id}", f"{DRAFT_CALLBACK_PREFIX}:edit:{draft.draft_id}")] for draft in drafts]
+    rows = [[_button(f"Edit #{number}", f"{DRAFT_CALLBACK_PREFIX}:edit:{draft.draft_id}")] for number, draft in enumerate(drafts, start=1)]
     rows.append([_button("Muat Semula", f"{DRAFT_CALLBACK_PREFIX}:list")])
     return {"inline_keyboard": rows}
 
@@ -838,6 +865,32 @@ def _match_author_option(text: str) -> tuple[str, str] | None:
         if normalized == name:
             return name, role
     return None
+
+
+def _resolve_draft_by_number(store: DraftStore, chat_id: int, display_number: int) -> tuple[int, DraftSummary] | None:
+    drafts = store.list_drafts(chat_id)
+    if display_number < 1 or display_number > len(drafts):
+        return None
+    summary = drafts[display_number - 1]
+    return summary.draft_id, summary
+
+
+def _draft_display_number(store: DraftStore, chat_id: int, draft_id: int | None) -> int | None:
+    if draft_id is None:
+        return None
+    drafts = store.list_drafts(chat_id)
+    for number, draft in enumerate(drafts, start=1):
+        if draft.draft_id == draft_id:
+            return number
+    return None
+
+
+def _draft_label_for_session(session: Session) -> str:
+    if session.display_number is not None:
+        return f"draf #{session.display_number}"
+    if session.draft_id is not None:
+        return "draf"
+    return "laporan"
 
 
 def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
@@ -964,7 +1017,7 @@ def _help_text() -> str:
         "Arahan bot:\n"
         "/start - mula draf baharu\n"
         "/drafts - senarai draf belum siap\n"
-        "/edit <id> - buka semula draf\n"
+        "/edit <nombor draf> - buka semula draf\n"
         "/done - siap untuk langkah semasa\n"
         "/cancel - batalkan draf semasa\n\n"
         "Format penting:\n"

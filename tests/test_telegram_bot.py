@@ -40,6 +40,7 @@ class TelegramBotReviewTest(unittest.TestCase):
     def test_review_text_contains_summary_and_button_instruction(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session = Session(chat_id=1, draft_id=7, workspace=Path(temp_dir))
+            session.display_number = 1
             session.data.update(
                 {
                     "date": "16/04/2026",
@@ -58,7 +59,7 @@ class TelegramBotReviewTest(unittest.TestCase):
 
             text = _review_text(session)
 
-            self.assertIn("Semakan laporan draf #7:", text)
+            self.assertIn("Semakan laporan draf #1:", text)
             self.assertIn("1. Tarikh laporan: 16/04/2026", text)
             self.assertIn("1. Kabel belum dirapikan (2 gambar)", text)
             self.assertIn("2. Label rack belum lengkap (0 gambar)", text)
@@ -131,7 +132,8 @@ class TelegramBotReviewTest(unittest.TestCase):
         ]
         text = _drafts_text(drafts)
         keyboard = _drafts_keyboard(drafts)
-        self.assertIn("#3 | Projek Demo | Fasa 1 | 16/04/2026", text)
+        self.assertIn("#1 | Projek Demo | Fasa 1 | 16/04/2026", text)
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Edit #1")
         self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "draft:edit:3")
 
     def test_build_output_paths_uses_pdf_and_docx(self) -> None:

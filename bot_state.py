@@ -16,6 +16,7 @@ class PendingIssue:
 class Session:
     chat_id: int
     draft_id: int | None = None
+    display_number: int | None = None
     field_index: int = 0
     data: dict[str, str] = field(default_factory=dict)
     issues: list[Issue] = field(default_factory=list)
