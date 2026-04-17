@@ -24,6 +24,7 @@ VERIFIER_NAME = "KHAIRUL ANUAR JOHARI"
 @dataclass(slots=True)
 class Issue:
     description: str
+    images_description: str = ""
     image_paths: list[Path] = field(default_factory=list)
 
 
@@ -43,6 +44,7 @@ class ReportData:
         issues = [
             Issue(
                 description=item["description"].strip(),
+                images_description=item.get("images_description", "").strip(),
                 image_paths=[Path(path) for path in item.get("image_paths", [])],
             )
             for item in payload.get("issues", [])
@@ -183,24 +185,31 @@ def _fill_issue_block(table: Table, row_start: int, issue: Issue) -> None:
     image_cell = table.cell(row_start, 1)
 
     _set_cell_text(description_cell, issue.description)
-    _set_issue_images(image_cell, issue.image_paths)
+    _set_issue_images(image_cell, issue.images_description, issue.image_paths)
 
 
 def _set_cell_text(cell: _Cell, text: str) -> None:
     cell.text = text
 
 
-def _set_issue_images(cell: _Cell, image_paths: list[Path]) -> None:
+def _set_issue_images(cell: _Cell, images_description: str, image_paths: list[Path]) -> None:
+    cell.text = ""
+
+    if images_description:
+        description_paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+        description_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        description_paragraph.add_run(images_description)
+
     if not image_paths:
-        cell.text = "Tiada lampiran."
+        paragraph = cell.add_paragraph() if images_description else (cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph())
+        paragraph.add_run("Tiada lampiran.")
         return
 
-    cell.text = ""
     lines = _group_image_lines(image_paths)
-    first_paragraph = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+    first_image_paragraph = cell.add_paragraph() if images_description else (cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph())
 
     for line_index, line in enumerate(lines):
-        paragraph = first_paragraph if line_index == 0 else cell.add_paragraph()
+        paragraph = first_image_paragraph if line_index == 0 else cell.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         for image_index, image_path in enumerate(line):

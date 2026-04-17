@@ -227,6 +227,10 @@ def _handle_update(
         _handle_issue_description(client, store, session, text)
         return
 
+    if session.stage == "issue_images_description":
+        _handle_issue_images_description(client, store, session, text)
+        return
+
     if session.stage == "issue_images":
         _handle_issue_images(client, store, session, message, text)
         return
@@ -333,6 +337,21 @@ def _handle_issue_description(client: TelegramBotClient, store: DraftStore, sess
         return
 
     session.current_issue = PendingIssue(description=text)
+    session.stage = "issue_images_description"
+    store.save_session(session)
+    client.send_message(
+        session.chat_id,
+        "Masukkan keterangan lampiran untuk isu ini jika perlu. Jika tiada, balas /skip.",
+    )
+
+
+def _handle_issue_images_description(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
+    normalized = text.strip()
+    if normalized.lower() == "/skip":
+        session.current_issue.images_description = ""
+    else:
+        session.current_issue.images_description = normalized
+
     session.stage = "issue_images"
     store.save_session(session)
     client.send_message(session.chat_id, "Hantar gambar untuk isu ini satu demi satu. Bila selesai, balas /done.")
@@ -388,6 +407,7 @@ def _handle_issue_images(
         session.issues.append(
             Issue(
                 description=session.current_issue.description,
+                images_description=session.current_issue.images_description,
                 image_paths=list(session.current_issue.image_paths),
             )
         )
@@ -731,7 +751,9 @@ def _review_text(session: Session) -> str:
     ]
     if session.issues:
         issue_lines = [
-            f"{index}. {issue.description} ({len(issue.image_paths)} gambar)"
+            f"{index}. {issue.description}"
+            + (f" | Lampiran: {issue.images_description}" if issue.images_description else "")
+            + f" ({len(issue.image_paths)} gambar)"
             for index, issue in enumerate(session.issues, start=1)
         ]
     else:
@@ -1036,6 +1058,9 @@ def _help_text() -> str:
         "- Tajuk laporan: teks ringkas\n"
         "- Tujuan laporan: ayat ringkas\n"
         "- Penyedia laporan: pilih daripada butang nama\n\n"
+        "Nota isu:\n"
+        "- Selepas keterangan isu, bot akan minta keterangan lampiran\n"
+        "- Balas /skip jika tiada keterangan lampiran tambahan\n\n"
         "Semakan akhir menggunakan butang, bukan arahan teks."
     )
 

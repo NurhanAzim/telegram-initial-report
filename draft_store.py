@@ -81,7 +81,7 @@ class DraftStore:
             "field_index": 0,
             "data": {},
             "issues": [],
-            "current_issue": {"description": "", "image_paths": []},
+            "current_issue": {"description": "", "images_description": "", "image_paths": []},
             "stage": "field",
             "edit_field_key": None,
             "edit_issue_index": None,
@@ -253,12 +253,14 @@ class DraftStore:
             "issues": [
                 {
                     "description": issue.description,
+                    "images_description": issue.images_description,
                     "image_paths": [str(path) for path in issue.image_paths],
                 }
                 for issue in session.issues
             ],
             "current_issue": {
                 "description": session.current_issue.description,
+                "images_description": session.current_issue.images_description,
                 "image_paths": [str(path) for path in session.current_issue.image_paths],
             },
             "stage": session.stage,
@@ -281,12 +283,14 @@ class DraftStore:
             issues=[
                 Issue(
                     description=item["description"],
+                    images_description=item.get("images_description", ""),
                     image_paths=[Path(path) for path in item.get("image_paths", [])],
                 )
                 for item in state.get("issues", [])
             ],
             current_issue=PendingIssue(
                 description=current_issue.get("description", ""),
+                images_description=current_issue.get("images_description", ""),
                 image_paths=[Path(path) for path in current_issue.get("image_paths", [])],
             ),
             stage=state.get("stage", "field"),

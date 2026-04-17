@@ -9,6 +9,7 @@ from report_generator import Issue
 @dataclass(slots=True)
 class PendingIssue:
     description: str = ""
+    images_description: str = ""
     image_paths: list[Path] = field(default_factory=list)
 
 

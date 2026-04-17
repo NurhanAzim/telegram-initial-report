@@ -39,7 +39,7 @@ class ReportGeneratorTest(unittest.TestCase):
                 report_purpose="Pemeriksaan awal",
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
-                issues=[Issue(description="Kabel belum dirapikan", image_paths=[image_path])],
+                issues=[Issue(description="Kabel belum dirapikan", images_description="Lampiran utama", image_paths=[image_path])],
             )
 
             render_report(template, output, report)
@@ -55,6 +55,7 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertIn("Nama: \tMUHAMMAD ADAM BIN JAFFRY", full_text)
             self.assertIn("Jawatan: DEVOPS ENGINEER", full_text)
             self.assertIn("Kabel belum dirapikan", table_text)
+            self.assertIn("Lampiran utama", table_text)
             self.assertNotIn("<date>", full_text)
             self.assertNotIn("<issue_description>", table_text)
             self.assertNotIn("<issue_images>", table_text)
@@ -77,8 +78,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
                 issues=[
-                    Issue(description="Isu pertama", image_paths=[]),
-                    Issue(description="Isu kedua", image_paths=[]),
+                    Issue(description="Isu pertama", images_description="", image_paths=[]),
+                    Issue(description="Isu kedua", images_description="", image_paths=[]),
                 ],
             )
 
@@ -113,6 +114,7 @@ class ReportGeneratorTest(unittest.TestCase):
                 issues=[
                     Issue(
                         description="Susun atur imej",
+                        images_description="Susunan atas gambar",
                         image_paths=[portrait_1, portrait_2, landscape],
                     )
                 ],
@@ -127,6 +129,7 @@ class ReportGeneratorTest(unittest.TestCase):
                 if "pic:pic" in paragraph._element.xml
             ]
 
+            self.assertEqual(image_cell.paragraphs[0].text, "Susunan atas gambar")
             self.assertEqual(len(drawing_paragraphs), 2)
             self.assertEqual(drawing_paragraphs[0]._element.xml.count("<pic:pic>"), 2)
             self.assertEqual(drawing_paragraphs[1]._element.xml.count("<pic:pic>"), 1)

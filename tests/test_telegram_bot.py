@@ -53,7 +53,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                 }
             )
             session.issues = [
-                Issue(description="Kabel belum dirapikan", image_paths=[Path("a.jpg"), Path("b.jpg")]),
+                Issue(description="Kabel belum dirapikan", images_description="Foto server rack", image_paths=[Path("a.jpg"), Path("b.jpg")]),
                 Issue(description="Label rack belum lengkap", image_paths=[]),
             ]
 
@@ -61,7 +61,7 @@ class TelegramBotReviewTest(unittest.TestCase):
 
             self.assertIn("Semakan laporan draf #1:", text)
             self.assertIn("1. Tarikh laporan: 16/04/2026", text)
-            self.assertIn("1. Kabel belum dirapikan (2 gambar)", text)
+            self.assertIn("1. Kabel belum dirapikan | Lampiran: Foto server rack (2 gambar)", text)
             self.assertIn("2. Label rack belum lengkap (0 gambar)", text)
             self.assertIn("6. Penyedia laporan: MUHAMMAD ADAM BIN JAFFRY", text)
             self.assertIn("Gunakan butang di bawah", text)

@@ -19,7 +19,7 @@ class DraftStoreTest(unittest.TestCase):
             session.data["date"] = "16/04/2026"
             session.data["project_name"] = "Projek Demo"
             session.stage = "review"
-            session.issues = [Issue(description="Kabel belum dirapikan", image_paths=[])]
+            session.issues = [Issue(description="Kabel belum dirapikan", images_description="Foto susulan", image_paths=[])]
             store.save_session(session)
 
             loaded = store.load_session(chat_id=123, draft_id=session.draft_id or 0)
@@ -29,6 +29,7 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(loaded.data["project_name"], "Projek Demo")
             self.assertEqual(loaded.stage, "review")
             self.assertEqual(loaded.issues[0].description, "Kabel belum dirapikan")
+            self.assertEqual(loaded.issues[0].images_description, "Foto susulan")
 
     def test_list_drafts_and_generated_file_retention(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
