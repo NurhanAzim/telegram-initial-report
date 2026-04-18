@@ -28,12 +28,28 @@ from telegram_bot import (
     _remove_reply_keyboard,
     _review_keyboard,
     _review_text,
+    _show_report_revisions,
     _yes_no_reply_keyboard,
 )
 from draft_store import DraftStore, DraftSummary, GeneratedFileRecord
 
 
 class TelegramBotReviewTest(unittest.TestCase):
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[int, str, dict | None]] = []
+
+        def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": len(self.messages)}
+
+        def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": message_id}
+
+        def delete_message(self, chat_id: int, message_id: int) -> dict:
+            return {}
+
     def test_parse_callback_data(self) -> None:
         self.assertEqual(_parse_callback_data("review:generate"), ("generate", None))
         self.assertEqual(_parse_callback_data("review:show_revisions"), ("show_revisions", None))
@@ -211,6 +227,34 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(keyboard["inline_keyboard"][0][0]["url"], "https://cloud.example.com/s/rev2")
         self.assertEqual(keyboard["inline_keyboard"][1][0]["text"], "Revision 1 (luput)")
         self.assertEqual(keyboard["inline_keyboard"][1][0]["callback_data"], "review:expired_revision:1")
+
+    def test_show_report_revisions_renders_timestamps_without_name_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.data.update(
+                {
+                    "date": "16/04/2026",
+                    "project_name": "Projek Demo",
+                    "project_sub_name": "Fasa 1",
+                }
+            )
+            store.save_session(session)
+            store.record_revision(
+                draft_id=session.draft_id or 0,
+                payload_json="{}",
+                remote_path="InitialReports/report-1.pdf",
+                share_id="share-1",
+                share_url="https://cloud.example.com/s/rev1",
+            )
+            client = self._FakeClient()
+
+            _show_report_revisions(client, store, session)
+
+            self.assertEqual(len(client.messages), 1)
+            self.assertIn("PDF revision untuk laporan R-", client.messages[0][1])
+            self.assertIn("Revision 1 | Tersedia |", client.messages[0][1])
 
     def test_count_total_images_counts_saved_and_current_issue(self) -> None:
         session = Session(chat_id=1)

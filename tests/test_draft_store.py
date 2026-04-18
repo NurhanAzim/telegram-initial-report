@@ -135,6 +135,28 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(len(active), 1)
             self.assertEqual(len(archived), 0)
 
+    def test_save_session_preserves_archived_status_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            report = store.create_report(chat_id=123)
+            report.data["project_name"] = "Report A"
+            store.save_session(report)
+            store.archive_report(chat_id=123, report_id=report.draft_id or 0)
+
+            archived_session = store.load_report_with_status(chat_id=123, report_id=report.draft_id or 0, statuses=("archived",))
+            self.assertIsNotNone(archived_session)
+            assert archived_session is not None
+            archived_session.review_message_id = 99
+            store.save_session(archived_session)
+
+            active = store.list_reports(chat_id=123)
+            archived = store.list_archived_reports(chat_id=123)
+            self.assertEqual(active, [])
+            self.assertEqual(len(archived), 1)
+            self.assertEqual(archived[0].project_name, "Report A")
+
     def test_auto_archive_stale_reports_only_targets_generated_active_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

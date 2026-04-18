@@ -196,13 +196,14 @@ class DraftStore:
         self.save_session(session)
         return session
 
-    def save_session(self, session: Session, status: str = "active") -> None:
+    def save_session(self, session: Session, status: str | None = None) -> None:
         if session.draft_id is None:
             raise ValueError("Cannot save a session without draft_id.")
 
         session.workspace.mkdir(parents=True, exist_ok=True)
         now = _now_iso()
         data = session.data
+        effective_status = status or session.report_status
         with self._connection() as connection:
             connection.execute(
                 """
@@ -216,7 +217,7 @@ class DraftStore:
                 WHERE id = ? AND chat_id = ?
                 """,
                 (
-                    status,
+                    effective_status,
                     data.get("date", ""),
                     data.get("project_name", ""),
                     data.get("project_sub_name", ""),
@@ -227,6 +228,7 @@ class DraftStore:
                 ),
             )
             self._replace_report_assets(connection, session)
+        session.report_status = effective_status
 
     def load_session(self, chat_id: int, draft_id: int) -> Session | None:
         return self.load_report(chat_id, draft_id)

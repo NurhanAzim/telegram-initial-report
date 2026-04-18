@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
@@ -11,10 +10,60 @@ from pathlib import Path
 
 import requests
 
-from bot_state import PendingIssue, Session
-from draft_store import DraftStore, DraftSummary
+from bot_state import Session
+from draft_store import DraftStore
 from nextcloud_client import NextcloudClient, sanitize_filename_part
-from report_generator import Issue, ReportData, render_report
+from report_generator import ReportData, render_report
+from telegram_flow import (
+    ConversationHooks,
+    _count_total_images,
+    _ensure_persisted_session,
+    _extract_image_file,
+    _handle_author_selection,
+    _handle_edit_command,
+    _handle_edit_field,
+    _handle_edit_issue_description,
+    _handle_field_input,
+    _handle_issue_description,
+    _handle_issue_images,
+    _handle_issue_images_description,
+    _handle_more_issues,
+    _resume_draft,
+)
+from telegram_ui import (
+    ARCHIVED_CALLBACK_PREFIX,
+    AUTHOR_BACK_LABEL,
+    AUTHOR_OPTIONS,
+    BOT_COMMANDS,
+    DRAFT_CALLBACK_PREFIX,
+    FIELD_GUIDANCE,
+    FIELD_LABELS,
+    FIELDS,
+    NO_LABEL,
+    REVIEW_CALLBACK_PREFIX,
+    YES_LABEL,
+    _archived_reports_keyboard,
+    _archived_reports_text,
+    _author_reply_keyboard,
+    _back_to_review_keyboard,
+    _draft_label_for_session,
+    _drafts_keyboard,
+    _drafts_text,
+    _expired_revision_prefix,
+    _field_prompt,
+    _field_selection_keyboard,
+    _format_timestamp,
+    _help_text,
+    _issue_selection_keyboard,
+    _match_author_option,
+    _parse_callback_data,
+    _remove_reply_keyboard,
+    _revision_keyboard,
+    _revision_status_label,
+    _review_keyboard,
+    _review_text,
+    _yes_no_reply_keyboard,
+)
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -31,39 +80,30 @@ MAX_ISSUES_PER_REPORT_DEFAULT = 20
 MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT = 40
 MAX_IMAGE_FILE_SIZE_MB_DEFAULT = 10
 
-FIELDS: list[tuple[str, str, str]] = [
-    ("date", "Tarikh laporan", "Format: DD/MM/YYYY. Contoh: 16/04/2026"),
-    ("project_name", "Nama projek", "Contoh: Naik taraf rangkaian HQ"),
-    ("project_sub_name", "Sub-projek", "Contoh: Fasa 1"),
-    ("report_title", "Tajuk laporan", "Contoh: Pemeriksaan bilik server"),
-    ("report_purpose", "Tujuan laporan", "Contoh: Pemeriksaan awal tapak"),
-    ("report_author", "Penyedia laporan", "Pilih nama daripada butang yang disediakan"),
+__all__ = [
+    "AUTHOR_BACK_LABEL",
+    "AUTHOR_OPTIONS",
+    "NO_LABEL",
+    "YES_LABEL",
+    "_archived_reports_keyboard",
+    "_archived_reports_text",
+    "_author_reply_keyboard",
+    "_build_output_paths",
+    "_count_total_images",
+    "_drafts_keyboard",
+    "_drafts_text",
+    "_ensure_persisted_session",
+    "_extract_image_file",
+    "_field_selection_keyboard",
+    "_issue_selection_keyboard",
+    "_match_author_option",
+    "_parse_callback_data",
+    "_remove_reply_keyboard",
+    "_revision_keyboard",
+    "_review_keyboard",
+    "_review_text",
+    "_yes_no_reply_keyboard",
 ]
-FIELD_LABELS = {key: label for key, label, _ in FIELDS}
-FIELD_GUIDANCE = {key: guidance for key, _, guidance in FIELDS}
-AUTHOR_OPTIONS: list[tuple[str, str]] = [
-    ("MUHAMMAD ADAM BIN JAFFRY", "DEVOPS ENGINEER"),
-    ("DZAHIRUDDIN BIN DZULKIFLEE", "ASSOCIATE ENGINEER"),
-    ("SYAMSUL RIZAL BIN BAKRI", "SENIOR ENGINEER"),
-    ("ZAILAH BINTI BUANG", "PROJECT EXECUTIVE"),
-    ("KHAIRUL ANUAR JOHARI", "TECHNICAL DIRECTOR"),
-]
-AUTHOR_BACK_LABEL = "Kembali ke Semakan"
-YES_LABEL = "Ya"
-NO_LABEL = "Tidak"
-
-BOT_COMMANDS = [
-    {"command": "start", "description": "Mula laporan baharu"},
-    {"command": "reports", "description": "Senarai laporan aktif"},
-    {"command": "archived", "description": "Senarai laporan arkib"},
-    {"command": "done", "description": "Selesai untuk langkah semasa"},
-    {"command": "cancel", "description": "Padam laporan semasa"},
-    {"command": "help", "description": "Tunjuk panduan ringkas"},
-]
-
-REVIEW_CALLBACK_PREFIX = "review"
-DRAFT_CALLBACK_PREFIX = "draft"
-ARCHIVED_CALLBACK_PREFIX = "archived"
 
 
 class TelegramBotClient:
@@ -245,11 +285,19 @@ def _handle_update(
         return
 
     if text.startswith("/edit"):
-        _handle_edit_command(client, store, sessions, chat_id, text)
+        _handle_edit_command(client, store, sessions, chat_id, text, CONVERSATION_HOOKS)
         return
 
     if text == "/help":
-        client.send_message(chat_id, _help_text())
+        client.send_message(
+            chat_id,
+            _help_text(
+                MAX_IMAGES_PER_ISSUE_DEFAULT,
+                MAX_ISSUES_PER_REPORT_DEFAULT,
+                MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT,
+                MAX_IMAGE_FILE_SIZE_MB_DEFAULT,
+            ),
+        )
         return
 
     session = sessions.get(chat_id)
@@ -266,11 +314,11 @@ def _handle_update(
         return
 
     if session.stage == "author_select":
-        _handle_author_selection(client, store, session, text)
+        _handle_author_selection(client, store, session, text, CONVERSATION_HOOKS)
         return
 
     if session.stage == "issue_description":
-        _handle_issue_description(client, store, session, text, max_issues_per_report)
+        _handle_issue_description(client, store, session, text, max_issues_per_report, CONVERSATION_HOOKS)
         return
 
     if session.stage == "issue_images_description":
@@ -291,7 +339,7 @@ def _handle_update(
         return
 
     if session.stage == "more_issues":
-        _handle_more_issues(client, store, session, text, max_issues_per_report)
+        _handle_more_issues(client, store, session, text, max_issues_per_report, CONVERSATION_HOOKS)
         return
 
     if session.stage == "review":
@@ -299,316 +347,18 @@ def _handle_update(
         return
 
     if session.stage == "edit_field":
-        _handle_edit_field(client, store, session, text)
+        _handle_edit_field(client, store, session, text, CONVERSATION_HOOKS)
         return
 
     if session.stage == "edit_author":
-        _handle_author_selection(client, store, session, text)
+        _handle_author_selection(client, store, session, text, CONVERSATION_HOOKS)
         return
 
     if session.stage == "edit_issue_description":
-        _handle_edit_issue_description(client, store, session, text)
+        _handle_edit_issue_description(client, store, session, text, CONVERSATION_HOOKS)
         return
 
     client.send_message(chat_id, "Keadaan sesi tidak dikenali. Hantar /cancel dan mula semula.")
-
-
-def _handle_edit_command(
-    client: TelegramBotClient,
-    store: DraftStore,
-    sessions: dict[int, Session],
-    chat_id: int,
-    text: str,
-) -> None:
-    match = re.fullmatch(r"/edit\s+(\d+)", text)
-    if not match:
-        client.send_message(chat_id, "Format: /edit <nombor laporan>. Contoh: /edit 1")
-        return
-
-    report_number = int(match.group(1))
-    resolved = _resolve_draft_by_number(store, chat_id, report_number)
-    if resolved is None:
-        client.send_message(chat_id, f"Laporan #{report_number} tidak dijumpai.")
-        return
-
-    report_id, _summary = resolved
-    session = store.load_report(chat_id, report_id)
-    if session is None:
-        client.send_message(chat_id, f"Laporan #{report_number} tidak dijumpai.")
-        return
-
-    sessions[chat_id] = session
-    _resume_draft(client, store, session, prefix=f"Laporan #{report_number} dibuka.\n\n")
-
-
-def _handle_field_input(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
-    if not text:
-        client.send_message(session.chat_id, "Medan ini perlu diisi dengan teks.")
-        return
-
-    key, _, guidance = FIELDS[session.field_index]
-    if key == "report_author":
-        session.stage = "author_select"
-        store.save_session(session)
-        client.send_message(
-            session.chat_id,
-            "Pilih penyedia laporan:",
-            reply_markup=_author_reply_keyboard(back_to_review=False),
-        )
-        return
-    if key == "date" and not _is_valid_date(text):
-        client.send_message(session.chat_id, f"Tarikh tidak sah. {guidance}")
-        return
-
-    _ensure_persisted_session(store, session)
-    session.data[key] = text
-    session.field_index += 1
-    store.save_session(session)
-
-    if session.field_index < len(FIELDS):
-        next_key = FIELDS[session.field_index][0]
-        if next_key == "report_author":
-            session.stage = "author_select"
-            store.save_session(session)
-            client.send_message(
-                session.chat_id,
-                "Pilih penyedia laporan:",
-                reply_markup=_author_reply_keyboard(back_to_review=False),
-            )
-        else:
-            client.send_message(session.chat_id, _field_prompt(session.field_index))
-        return
-
-    session.stage = "issue_description"
-    store.save_session(session)
-    client.send_message(session.chat_id, "Hantar keterangan isu pertama. Jika tiada isu, balas /done.")
-
-
-def _handle_issue_description(
-    client: TelegramBotClient,
-    store: DraftStore,
-    session: Session,
-    text: str,
-    max_issues_per_report: int,
-) -> None:
-    if text == "/done":
-        _enter_review(client, store, session)
-        return
-    if not text:
-        client.send_message(session.chat_id, "Keterangan isu tidak boleh kosong.")
-        return
-    if len(session.issues) >= max_issues_per_report:
-        _enter_review(client, store, session)
-        client.send_message(
-            session.chat_id,
-            f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
-        )
-        return
-
-    _ensure_persisted_session(store, session)
-    session.current_issue = PendingIssue(description=text)
-    session.stage = "issue_images_description"
-    store.save_session(session)
-    client.send_message(
-        session.chat_id,
-        "Masukkan keterangan lampiran untuk isu ini jika perlu. Jika tiada, balas /skip.",
-    )
-
-
-def _handle_issue_images_description(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
-    _ensure_persisted_session(store, session)
-    normalized = text.strip()
-    if normalized.lower() == "/skip":
-        session.current_issue.images_description = ""
-    else:
-        session.current_issue.images_description = normalized
-
-    session.stage = "issue_images"
-    store.save_session(session)
-    client.send_message(session.chat_id, "Hantar gambar untuk isu ini satu demi satu. Bila selesai, balas /done.")
-
-
-def _handle_author_selection(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
-    normalized = text.strip()
-    if session.stage == "edit_author" and normalized == AUTHOR_BACK_LABEL:
-        session.stage = "review"
-        session.edit_field_key = None
-        store.save_session(session)
-        _show_review(client, store, session)
-        return
-
-    match = _match_author_option(normalized)
-    if match is None:
-        client.send_message(
-            session.chat_id,
-            "Pilih nama menggunakan papan kekunci yang disediakan.",
-            reply_markup=_author_reply_keyboard(back_to_review=session.stage == "edit_author"),
-        )
-        return
-
-    author_name, author_role = match
-    _ensure_persisted_session(store, session)
-    session.data["report_author"] = author_name
-    session.data["report_author_role"] = author_role
-
-    if session.stage == "author_select":
-        session.field_index = len(FIELDS)
-        session.stage = "issue_description"
-        store.save_session(session)
-        client.send_message(
-            session.chat_id,
-            f"Penyedia laporan dipilih: {author_name}\n\nHantar keterangan isu pertama. Jika tiada isu, balas /done.",
-            reply_markup=_remove_reply_keyboard(),
-        )
-        return
-
-    session.stage = "review"
-    session.edit_field_key = None
-    store.save_session(session)
-    _show_review(client, store, session, prefix=f"Penyedia laporan telah dikemas kini kepada {author_name}.\n\n")
-
-
-def _handle_issue_images(
-    client: TelegramBotClient,
-    store: DraftStore,
-    session: Session,
-    message: dict,
-    text: str,
-    max_images_per_issue: int,
-    max_total_images_per_report: int,
-    max_image_file_size_bytes: int,
-) -> None:
-    if text == "/done":
-        _ensure_persisted_session(store, session)
-        session.issues.append(
-            Issue(
-                description=session.current_issue.description,
-                images_description=session.current_issue.images_description,
-                image_paths=list(session.current_issue.image_paths),
-            )
-        )
-        session.current_issue = PendingIssue()
-        session.stage = "more_issues"
-        store.save_session(session)
-        client.send_message(
-            session.chat_id,
-            "Tambah isu lain?",
-            reply_markup=_yes_no_reply_keyboard(),
-        )
-        return
-
-    image_file_id, suffix, file_size = _extract_image_file(message)
-    if not image_file_id:
-        client.send_message(session.chat_id, "Hantar gambar sebagai photo atau dokumen imej, atau balas /done.")
-        return
-    if len(session.current_issue.image_paths) >= max_images_per_issue:
-        client.send_message(
-            session.chat_id,
-            f"Had gambar bagi satu isu telah dicapai ({max_images_per_issue}). Balas /done untuk teruskan.",
-        )
-        return
-    if _count_total_images(session) >= max_total_images_per_report:
-        client.send_message(
-            session.chat_id,
-            f"Had jumlah gambar bagi satu laporan telah dicapai ({max_total_images_per_report}). Balas /done untuk teruskan.",
-        )
-        return
-    if file_size is not None and file_size > max_image_file_size_bytes:
-        limit_mb = max_image_file_size_bytes / (1024 * 1024)
-        client.send_message(
-            session.chat_id,
-            f"Saiz fail gambar melebihi had {limit_mb:.0f} MB. Sila hantar fail lebih kecil.",
-        )
-        return
-
-    _ensure_persisted_session(store, session)
-    issue_number = len(session.issues) + 1
-    image_number = len(session.current_issue.image_paths) + 1
-    file_path = session.workspace / f"issue-{issue_number}-{image_number}{suffix}"
-    client.download_file(image_file_id, file_path)
-    session.current_issue.image_paths.append(file_path)
-    store.save_session(session)
-    client.send_message(session.chat_id, f"Gambar diterima: {file_path.name}")
-
-
-def _handle_more_issues(
-    client: TelegramBotClient,
-    store: DraftStore,
-    session: Session,
-    text: str,
-    max_issues_per_report: int,
-) -> None:
-    normalized = text.lower()
-    if normalized in {YES_LABEL.lower(), "y", "yes"}:
-        if len(session.issues) >= max_issues_per_report:
-            _enter_review(client, store, session)
-            client.send_message(
-                session.chat_id,
-                f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
-            )
-            return
-        session.stage = "issue_description"
-        store.save_session(session)
-        client.send_message(
-            session.chat_id,
-            "Hantar keterangan isu seterusnya.",
-            reply_markup=_remove_reply_keyboard(),
-        )
-        return
-    if normalized in {NO_LABEL.lower(), "tak", "t", "no", "n"}:
-        _enter_review(client, store, session)
-        return
-
-    client.send_message(
-        session.chat_id,
-        "Pilih Ya atau Tidak menggunakan papan kekunci yang disediakan.",
-        reply_markup=_yes_no_reply_keyboard(),
-    )
-
-
-def _handle_edit_field(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
-    field_key = session.edit_field_key
-    if not field_key:
-        session.stage = "review"
-        store.save_session(session)
-        _show_review(client, store, session)
-        return
-
-    if not text:
-        client.send_message(session.chat_id, "Nilai ini tidak boleh kosong.")
-        return
-
-    if field_key == "date" and not _is_valid_date(text):
-        client.send_message(session.chat_id, f"Tarikh tidak sah. {FIELD_GUIDANCE[field_key]}")
-        return
-
-    session.data[field_key] = text
-    session.edit_field_key = None
-    session.stage = "review"
-    store.save_session(session)
-    _show_review(client, store, session, prefix=f"{FIELD_LABELS[field_key]} telah dikemas kini.\n\n")
-
-
-def _handle_edit_issue_description(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
-    issue_index = session.edit_issue_index
-    if issue_index is None or issue_index >= len(session.issues):
-        session.edit_issue_index = None
-        session.stage = "review"
-        store.save_session(session)
-        _show_review(client, store, session)
-        return
-
-    if not text:
-        client.send_message(session.chat_id, "Keterangan isu tidak boleh kosong.")
-        return
-
-    issue_number = issue_index + 1
-    session.issues[issue_index].description = text
-    session.edit_issue_index = None
-    session.stage = "review"
-    store.save_session(session)
-    _show_review(client, store, session, prefix=f"Keterangan isu {issue_number} telah dikemas kini.\n\n")
-
 
 def _handle_callback_query(
     client: TelegramBotClient,
@@ -642,7 +392,7 @@ def _handle_callback_query(
             return
         _delete_message_if_possible(client, chat_id, message.get("message_id"))
         sessions[chat_id] = session
-        _resume_draft(client, store, session, prefix=f"Laporan #{draft_number} dibuka.\n\n")
+        _resume_draft(client, store, session, CONVERSATION_HOOKS, prefix=f"Laporan #{draft_number} dibuka.\n\n")
         return
 
     if action == "archived_edit" and isinstance(value, int):
@@ -654,7 +404,7 @@ def _handle_callback_query(
         client.answer_callback_query(callback_id, f"Membuka R-{value}...")
         _delete_message_if_possible(client, chat_id, message.get("message_id"))
         sessions[chat_id] = session
-        _resume_draft(client, store, session, prefix=f"Laporan arkib R-{value} dibuka.\n\n")
+        _resume_draft(client, store, session, CONVERSATION_HOOKS, prefix=f"Laporan arkib R-{value} dibuka.\n\n")
         return
 
     if action == "draft_list":
@@ -822,24 +572,6 @@ def _handle_callback_query(
     client.answer_callback_query(callback_id)
     _show_review(client, store, session)
 
-
-def _resume_draft(client: TelegramBotClient, store: DraftStore, session: Session, prefix: str = "") -> None:
-    session.stage = "review"
-    session.edit_field_key = None
-    session.edit_issue_index = None
-    store.save_session(session)
-    _show_review(client, store, session, prefix=prefix)
-
-
-def _enter_review(client: TelegramBotClient, store: DraftStore, session: Session) -> None:
-    session.stage = "review"
-    session.edit_field_key = None
-    session.edit_issue_index = None
-    store.save_session(session)
-    _dismiss_reply_keyboard(client, session.chat_id)
-    _show_review(client, store, session)
-
-
 def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store: DraftStore, session: Session) -> int:
     report = ReportData(
         date=session.data["date"],
@@ -894,60 +626,6 @@ def _show_archived_reports(client: TelegramBotClient, store: DraftStore, chat_id
         client.send_message(chat_id, "Tiada laporan arkib.")
         return
     client.send_message(chat_id, _archived_reports_text(reports), reply_markup=_archived_reports_keyboard(reports))
-
-
-def _drafts_text(drafts: list[DraftSummary]) -> str:
-    lines = ["Laporan aktif:"]
-    for draft in drafts:
-        project = draft.project_name or "(belum diisi)"
-        sub_project = draft.project_sub_name or "-"
-        date = draft.date or "-"
-        lines.append(f"R-{draft.draft_id} | {project} | {sub_project} | {date}")
-    lines.append("")
-    lines.append("Tekan butang Buka atau guna /edit <nombor laporan>.")
-    return "\n".join(lines)
-
-
-def _archived_reports_text(reports: list[DraftSummary]) -> str:
-    lines = ["Laporan arkib:"]
-    for report in reports:
-        project = report.project_name or "(belum diisi)"
-        sub_project = report.project_sub_name or "-"
-        date = report.date or "-"
-        lines.append(f"R-{report.draft_id} | {project} | {sub_project} | {date}")
-    lines.append("")
-    lines.append("Tekan butang Buka untuk lihat dan pulihkan laporan arkib.")
-    return "\n".join(lines)
-
-
-def _field_prompt(index: int) -> str:
-    key, label, guidance = FIELDS[index]
-    return f"{index + 1}/{len(FIELDS)}. Masukkan {label} ({key}).\n{guidance}"
-
-
-def _review_text(session: Session) -> str:
-    draft_label = _draft_label_for_session(session)
-    status_line = "Status: Diarkibkan" if session.report_status == "archived" else "Status: Aktif"
-    header_lines = [
-        f"Semakan {draft_label}:",
-        status_line,
-        *[
-            f"{index}. {label}: {session.data.get(key, '-')}"
-            for index, (key, label, _) in enumerate(FIELDS, start=1)
-        ],
-        "",
-        "Isu:",
-    ]
-    if session.issues:
-        issue_lines = [
-            f"{index}. {issue.description}"
-            + (f" | Lampiran: {issue.images_description}" if issue.images_description else "")
-            + f" ({len(issue.image_paths)} gambar)"
-            for index, issue in enumerate(session.issues, start=1)
-        ]
-    else:
-        issue_lines = ["Tiada isu."]
-    return "\n".join(header_lines + issue_lines + ["", "Gunakan butang di bawah untuk semak, ubah, atau jana laporan."])
 
 
 def _show_report_revisions(
@@ -1026,121 +704,12 @@ def _set_review_message(
         store.save_session(session)
 
 
-def _review_keyboard(session: Session) -> dict:
-    if session.report_status == "archived":
-        return {
-            "inline_keyboard": [
-                [
-                    _button("Lihat PDF", f"{REVIEW_CALLBACK_PREFIX}:show_revisions"),
-                    _button("Pulih", f"{REVIEW_CALLBACK_PREFIX}:restore"),
-                ],
-                [_button("Padam Laporan", f"{REVIEW_CALLBACK_PREFIX}:delete_report")],
-                [_button("Muat Semula", f"{REVIEW_CALLBACK_PREFIX}:show")],
-            ]
-        }
-
-    rows = [
-        [
-            _button("Jana Laporan", f"{REVIEW_CALLBACK_PREFIX}:generate"),
-            _button("Tambah Isu", f"{REVIEW_CALLBACK_PREFIX}:add_issue"),
-        ],
-        [_button("Edit Butiran", f"{REVIEW_CALLBACK_PREFIX}:menu_fields")],
-    ]
-    if session.issues:
-        rows.append(
-            [
-                _button("Edit Isu", f"{REVIEW_CALLBACK_PREFIX}:menu_edit_issues"),
-                _button("Padam Isu", f"{REVIEW_CALLBACK_PREFIX}:menu_delete_issues"),
-            ]
-        )
-    rows.append(
-        [
-            _button("Lihat PDF", f"{REVIEW_CALLBACK_PREFIX}:show_revisions"),
-            _button("Arkib", f"{REVIEW_CALLBACK_PREFIX}:archive"),
-        ]
-    )
-    rows.append([_button("Padam Laporan", f"{REVIEW_CALLBACK_PREFIX}:delete_report")])
-    rows.append([_button("Muat Semula", f"{REVIEW_CALLBACK_PREFIX}:show")])
-    return {"inline_keyboard": rows}
-
-
-def _field_selection_keyboard() -> dict:
-    rows = [
-        [_button(f"{index}. {label}", f"{REVIEW_CALLBACK_PREFIX}:field:{key}")]
-        for index, (key, label, _) in enumerate(FIELDS, start=1)
-    ]
-    rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
-    return {"inline_keyboard": rows}
-
-
-def _author_reply_keyboard(back_to_review: bool) -> dict:
-    rows = [[{"text": name}] for name, _ in AUTHOR_OPTIONS]
-    if back_to_review:
-        rows.append([{"text": AUTHOR_BACK_LABEL}])
-    return {"keyboard": rows, "resize_keyboard": True, "one_time_keyboard": True}
-
-
-def _yes_no_reply_keyboard() -> dict:
-    return {
-        "keyboard": [[{"text": YES_LABEL}, {"text": NO_LABEL}]],
-        "resize_keyboard": True,
-        "one_time_keyboard": True,
-    }
-
-
-def _remove_reply_keyboard() -> dict:
-    return {"remove_keyboard": True}
-
-
 def _show_issue_selection_menu(client: TelegramBotClient, store: DraftStore, session: Session, mode: str) -> None:
     if not session.issues:
         _show_review(client, store, session, prefix="Tiada isu untuk dipilih.\n\n")
         return
     title = "Pilih isu yang mahu diubah:" if mode == "edit" else "Pilih isu yang mahu dibuang:"
     _set_review_message(client, store, session, title, _issue_selection_keyboard(session, mode))
-
-
-def _issue_selection_keyboard(session: Session, mode: str) -> dict:
-    action = "edit_issue" if mode == "edit" else "delete_issue"
-    rows = []
-    for index, issue in enumerate(session.issues, start=1):
-        preview = issue.description.strip() or "(tanpa keterangan)"
-        preview = preview[:36] + "..." if len(preview) > 36 else preview
-        rows.append([_button(f"{index}. {preview}", f"{REVIEW_CALLBACK_PREFIX}:{action}:{index - 1}")])
-    rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
-    return {"inline_keyboard": rows}
-
-
-def _drafts_keyboard(drafts: list[DraftSummary]) -> dict:
-    rows = [[_button(f"Buka R-{draft.draft_id}", f"{DRAFT_CALLBACK_PREFIX}:edit:{draft.draft_id}")] for draft in drafts]
-    rows.append([_button("Muat Semula", f"{DRAFT_CALLBACK_PREFIX}:list")])
-    return {"inline_keyboard": rows}
-
-
-def _archived_reports_keyboard(reports: list[DraftSummary]) -> dict:
-    rows = [[_button(f"Buka R-{report.draft_id}", f"{ARCHIVED_CALLBACK_PREFIX}:edit:{report.draft_id}")] for report in reports]
-    rows.append([_button("Muat Semula", f"{ARCHIVED_CALLBACK_PREFIX}:list")])
-    return {"inline_keyboard": rows}
-
-
-def _back_to_review_keyboard() -> dict:
-    return {"inline_keyboard": [[_button("Kembali ke Semakan", f"{REVIEW_CALLBACK_PREFIX}:back")]]}
-
-
-def _button(text: str, callback_data: str) -> dict:
-    return {"text": text, "callback_data": callback_data}
-
-
-def _url_button(text: str, url: str) -> dict:
-    return {"text": text, "url": url}
-
-
-def _match_author_option(text: str) -> tuple[str, str] | None:
-    normalized = text.strip()
-    for name, role in AUTHOR_OPTIONS:
-        if normalized == name:
-            return name, role
-    return None
 
 
 def _dismiss_reply_keyboard(client: TelegramBotClient, chat_id: int) -> None:
@@ -1151,6 +720,12 @@ def _dismiss_reply_keyboard(client: TelegramBotClient, chat_id: int) -> None:
         LOGGER.debug("Failed to dismiss reply keyboard for chat %s", chat_id, exc_info=True)
 
 
+CONVERSATION_HOOKS = ConversationHooks(
+    show_review=_show_review,
+    dismiss_reply_keyboard=_dismiss_reply_keyboard,
+)
+
+
 def _delete_message_if_possible(client: TelegramBotClient, chat_id: int, message_id: int | None) -> None:
     if not message_id:
         return
@@ -1158,25 +733,6 @@ def _delete_message_if_possible(client: TelegramBotClient, chat_id: int, message
         client.delete_message(chat_id, message_id)
     except Exception:
         LOGGER.debug("Failed to delete message %s in chat %s", message_id, chat_id, exc_info=True)
-
-
-def _ensure_persisted_session(store: DraftStore, session: Session) -> None:
-    if session.draft_id is not None:
-        return
-
-    persisted = store.create_report(session.chat_id)
-    session.draft_id = persisted.draft_id
-    session.workspace = persisted.workspace
-    store.save_session(session)
-
-
-def _resolve_draft_by_number(store: DraftStore, chat_id: int, display_number: int) -> tuple[int, DraftSummary] | None:
-    drafts = store.list_drafts(chat_id)
-    if display_number < 1 or display_number > len(drafts):
-        return None
-    summary = drafts[display_number - 1]
-    return summary.draft_id, summary
-
 
 def _draft_display_number(store: DraftStore, chat_id: int, draft_id: int | None) -> int | None:
     if draft_id is None:
@@ -1186,110 +742,6 @@ def _draft_display_number(store: DraftStore, chat_id: int, draft_id: int | None)
         if draft.draft_id == draft_id:
             return number
     return None
-
-
-def _draft_label_for_session(session: Session) -> str:
-    if session.draft_id is not None:
-        ref = f"R-{session.draft_id}"
-    else:
-        ref = "laporan"
-    if session.display_number is not None:
-        return f"laporan {ref}"
-    return f"laporan {ref}"
-
-
-def _format_timestamp(value: str) -> str:
-    try:
-        dt = datetime.fromisoformat(value)
-    except ValueError:
-        return value
-
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    local_dt = dt.astimezone()
-    return local_dt.strftime("%d/%m/%Y %H:%M")
-
-
-def _revision_keyboard(revisions: list[GeneratedFileRecord]) -> dict:
-    rows = []
-    for revision in revisions:
-        if revision.status == "available":
-            rows.append([_url_button(f"Revision {revision.revision_number}", revision.share_url)])
-        else:
-            rows.append(
-                [
-                    _button(
-                        f"Revision {revision.revision_number} (luput)",
-                        f"{REVIEW_CALLBACK_PREFIX}:expired_revision:{revision.revision_number}",
-                    )
-                ]
-            )
-    rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
-    return {"inline_keyboard": rows}
-
-
-def _revision_status_label(status: str) -> str:
-    return {
-        "available": "Tersedia",
-        "expired": "Luput",
-    }.get(status, status)
-
-
-def _expired_revision_prefix(revision_number: int) -> str:
-    return (
-        f"Revision {revision_number} telah luput dan fail PDF itu sudah dipadam.\n"
-        "Pilih revision lain yang masih tersedia, atau tekan Kembali untuk jana PDF baharu.\n\n"
-    )
-
-
-def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
-    parts = data.split(":")
-    if len(parts) < 2:
-        return "unknown", None
-
-    prefix, action = parts[0], parts[1]
-    if prefix == REVIEW_CALLBACK_PREFIX:
-        if action in {"generate", "back", "show", "add_issue", "menu_fields", "menu_edit_issues", "menu_delete_issues", "show_revisions", "archive", "restore", "delete_report"}:
-            return action, None
-        if action == "expired_revision" and len(parts) >= 3 and parts[2].isdigit():
-            return "expired_revision", int(parts[2])
-        if action == "field" and len(parts) >= 3:
-            return "select_field", parts[2]
-        if action == "edit_issue" and len(parts) >= 3 and parts[2].isdigit():
-            return "select_edit_issue", int(parts[2])
-        if action == "delete_issue" and len(parts) >= 3 and parts[2].isdigit():
-            return "select_delete_issue", int(parts[2])
-        return "unknown", None
-
-    if prefix == DRAFT_CALLBACK_PREFIX:
-        if action == "list":
-            return "draft_list", None
-        if action == "edit" and len(parts) >= 3 and parts[2].isdigit():
-            return "draft_edit", int(parts[2])
-
-    if prefix == ARCHIVED_CALLBACK_PREFIX:
-        if action == "list":
-            return "archived_list", None
-        if action == "edit" and len(parts) >= 3 and parts[2].isdigit():
-            return "archived_edit", int(parts[2])
-
-    return "unknown", None
-
-
-def _extract_image_file(message: dict) -> tuple[str | None, str, int | None]:
-    photos = message.get("photo") or []
-    if photos:
-        largest = photos[-1]
-        return largest["file_id"], ".jpg", largest.get("file_size")
-    document = message.get("document")
-    if document and (document.get("mime_type") or "").startswith("image/"):
-        extension = Path(document.get("file_name") or "image.bin").suffix or ".bin"
-        return document["file_id"], extension, document.get("file_size")
-    return None, "", None
-
-
-def _count_total_images(session: Session) -> int:
-    return sum(len(issue.image_paths) for issue in session.issues) + len(session.current_issue.image_paths)
 
 
 def _build_output_name(report: ReportData, extension: str) -> str:
@@ -1422,38 +874,6 @@ def _load_nextcloud_client() -> NextcloudClient:
     if missing:
         raise SystemExit(f"Missing Nextcloud config: {', '.join(missing)}")
     return NextcloudClient(base_url=base_url, username=username, password=password, upload_dir=upload_dir)
-
-
-def _help_text() -> str:
-    return (
-        "Arahan bot:\n"
-        "/start - mula laporan baharu\n"
-        "/reports - senarai laporan aktif\n"
-        "/archived - senarai laporan arkib\n"
-        "/done - siap untuk langkah semasa\n"
-        "/cancel - padam laporan semasa\n\n"
-        "Format penting:\n"
-        "- Tarikh: DD/MM/YYYY\n"
-        "- Nama projek: teks ringkas\n"
-        "- Sub-projek: teks ringkas\n"
-        "- Tajuk laporan: teks ringkas\n"
-        "- Tujuan laporan: ayat ringkas\n"
-        "- Penyedia laporan: pilih daripada butang nama\n\n"
-        "Nota isu:\n"
-        "- Selepas keterangan isu, bot akan minta keterangan lampiran\n"
-        "- Balas /skip jika tiada keterangan lampiran tambahan\n\n"
-        "Had lalai:\n"
-        f"- Max gambar per isu: {MAX_IMAGES_PER_ISSUE_DEFAULT}\n"
-        f"- Max isu per laporan: {MAX_ISSUES_PER_REPORT_DEFAULT}\n"
-        f"- Max jumlah gambar per laporan: {MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT}\n"
-        f"- Max saiz gambar: {MAX_IMAGE_FILE_SIZE_MB_DEFAULT} MB\n\n"
-        "Semakan akhir menggunakan butang, bukan arahan teks. Setiap jana PDF akan mencipta revision baharu, dan laporan arkib boleh dilihat semula melalui /archived."
-    )
-
-
-def _is_valid_date(value: str) -> bool:
-    return bool(re.fullmatch(r"(0[1-9]|[12][0-9]|3[01])/(0[1-9]|1[0-2])/\d{4}", value.strip()))
-
 
 if __name__ == "__main__":
     main()
