@@ -25,6 +25,10 @@ HOUSEKEEPING_INTERVAL_SECONDS = 3600
 ENV_PATH = Path(".env")
 TEMPLATE_PATH = Path("Template Initial Report.docx")
 ARCHIVED_REPORT_RETENTION_DAYS_DEFAULT = 30
+MAX_IMAGES_PER_ISSUE_DEFAULT = 10
+MAX_ISSUES_PER_REPORT_DEFAULT = 20
+MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT = 40
+MAX_IMAGE_FILE_SIZE_MB_DEFAULT = 10
 
 FIELDS: list[tuple[str, str, str]] = [
     ("date", "Tarikh laporan", "Format: DD/MM/YYYY. Contoh: 16/04/2026"),
@@ -140,6 +144,10 @@ def main() -> None:
     backup_dir = Path(os.getenv("BACKUP_DIR", str(data_dir / "backups"))).resolve()
     retention_days = int(os.getenv("RETENTION_PERIOD_DAYS", "14"))
     archived_report_retention_days = int(os.getenv("ARCHIVED_REPORT_RETENTION_DAYS", str(ARCHIVED_REPORT_RETENTION_DAYS_DEFAULT)))
+    max_images_per_issue = int(os.getenv("MAX_IMAGES_PER_ISSUE", str(MAX_IMAGES_PER_ISSUE_DEFAULT)))
+    max_issues_per_report = int(os.getenv("MAX_ISSUES_PER_REPORT", str(MAX_ISSUES_PER_REPORT_DEFAULT)))
+    max_total_images_per_report = int(os.getenv("MAX_TOTAL_IMAGES_PER_REPORT", str(MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT)))
+    max_image_file_size_bytes = int(float(os.getenv("MAX_IMAGE_FILE_SIZE_MB", str(MAX_IMAGE_FILE_SIZE_MB_DEFAULT))) * 1024 * 1024)
 
     data_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -165,7 +173,17 @@ def main() -> None:
             updates = client.get_updates(next_offset)
             for update in updates:
                 next_offset = update["update_id"] + 1
-                _handle_update(client, nextcloud, store, update, sessions)
+                _handle_update(
+                    client,
+                    nextcloud,
+                    store,
+                    update,
+                    sessions,
+                    max_images_per_issue,
+                    max_issues_per_report,
+                    max_total_images_per_report,
+                    max_image_file_size_bytes,
+                )
         except KeyboardInterrupt:
             raise
         except Exception:
@@ -179,6 +197,10 @@ def _handle_update(
     store: DraftStore,
     update: dict,
     sessions: dict[int, Session],
+    max_images_per_issue: int,
+    max_issues_per_report: int,
+    max_total_images_per_report: int,
+    max_image_file_size_bytes: int,
 ) -> None:
     callback_query = update.get("callback_query")
     if callback_query:
@@ -232,7 +254,7 @@ def _handle_update(
         return
 
     if session.stage == "issue_description":
-        _handle_issue_description(client, store, session, text)
+        _handle_issue_description(client, store, session, text, max_issues_per_report)
         return
 
     if session.stage == "issue_images_description":
@@ -240,11 +262,20 @@ def _handle_update(
         return
 
     if session.stage == "issue_images":
-        _handle_issue_images(client, store, session, message, text)
+        _handle_issue_images(
+            client,
+            store,
+            session,
+            message,
+            text,
+            max_images_per_issue,
+            max_total_images_per_report,
+            max_image_file_size_bytes,
+        )
         return
 
     if session.stage == "more_issues":
-        _handle_more_issues(client, store, session, text)
+        _handle_more_issues(client, store, session, text, max_issues_per_report)
         return
 
     if session.stage == "review":
@@ -337,12 +368,25 @@ def _handle_field_input(client: TelegramBotClient, store: DraftStore, session: S
     client.send_message(session.chat_id, "Hantar keterangan isu pertama. Jika tiada isu, balas /done.")
 
 
-def _handle_issue_description(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
+def _handle_issue_description(
+    client: TelegramBotClient,
+    store: DraftStore,
+    session: Session,
+    text: str,
+    max_issues_per_report: int,
+) -> None:
     if text == "/done":
         _enter_review(client, store, session)
         return
     if not text:
         client.send_message(session.chat_id, "Keterangan isu tidak boleh kosong.")
+        return
+    if len(session.issues) >= max_issues_per_report:
+        _enter_review(client, store, session)
+        client.send_message(
+            session.chat_id,
+            f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
+        )
         return
 
     _ensure_persisted_session(store, session)
@@ -414,6 +458,9 @@ def _handle_issue_images(
     session: Session,
     message: dict,
     text: str,
+    max_images_per_issue: int,
+    max_total_images_per_report: int,
+    max_image_file_size_bytes: int,
 ) -> None:
     if text == "/done":
         _ensure_persisted_session(store, session)
@@ -434,9 +481,28 @@ def _handle_issue_images(
         )
         return
 
-    image_file_id, suffix = _extract_image_file(message)
+    image_file_id, suffix, file_size = _extract_image_file(message)
     if not image_file_id:
         client.send_message(session.chat_id, "Hantar gambar sebagai photo atau dokumen imej, atau balas /done.")
+        return
+    if len(session.current_issue.image_paths) >= max_images_per_issue:
+        client.send_message(
+            session.chat_id,
+            f"Had gambar bagi satu isu telah dicapai ({max_images_per_issue}). Balas /done untuk teruskan.",
+        )
+        return
+    if _count_total_images(session) >= max_total_images_per_report:
+        client.send_message(
+            session.chat_id,
+            f"Had jumlah gambar bagi satu laporan telah dicapai ({max_total_images_per_report}). Balas /done untuk teruskan.",
+        )
+        return
+    if file_size is not None and file_size > max_image_file_size_bytes:
+        limit_mb = max_image_file_size_bytes / (1024 * 1024)
+        client.send_message(
+            session.chat_id,
+            f"Saiz fail gambar melebihi had {limit_mb:.0f} MB. Sila hantar fail lebih kecil.",
+        )
         return
 
     _ensure_persisted_session(store, session)
@@ -449,9 +515,22 @@ def _handle_issue_images(
     client.send_message(session.chat_id, f"Gambar diterima: {file_path.name}")
 
 
-def _handle_more_issues(client: TelegramBotClient, store: DraftStore, session: Session, text: str) -> None:
+def _handle_more_issues(
+    client: TelegramBotClient,
+    store: DraftStore,
+    session: Session,
+    text: str,
+    max_issues_per_report: int,
+) -> None:
     normalized = text.lower()
     if normalized in {YES_LABEL.lower(), "y", "yes"}:
+        if len(session.issues) >= max_issues_per_report:
+            _enter_review(client, store, session)
+            client.send_message(
+                session.chat_id,
+                f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
+            )
+            return
         session.stage = "issue_description"
         store.save_session(session)
         client.send_message(
@@ -1153,15 +1232,20 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
     return "unknown", None
 
 
-def _extract_image_file(message: dict) -> tuple[str | None, str]:
+def _extract_image_file(message: dict) -> tuple[str | None, str, int | None]:
     photos = message.get("photo") or []
     if photos:
-        return photos[-1]["file_id"], ".jpg"
+        largest = photos[-1]
+        return largest["file_id"], ".jpg", largest.get("file_size")
     document = message.get("document")
     if document and (document.get("mime_type") or "").startswith("image/"):
         extension = Path(document.get("file_name") or "image.bin").suffix or ".bin"
-        return document["file_id"], extension
-    return None, ""
+        return document["file_id"], extension, document.get("file_size")
+    return None, "", None
+
+
+def _count_total_images(session: Session) -> int:
+    return sum(len(issue.image_paths) for issue in session.issues) + len(session.current_issue.image_paths)
 
 
 def _build_output_name(report: ReportData, extension: str) -> str:
@@ -1307,7 +1391,12 @@ def _help_text() -> str:
         "Nota isu:\n"
         "- Selepas keterangan isu, bot akan minta keterangan lampiran\n"
         "- Balas /skip jika tiada keterangan lampiran tambahan\n\n"
-        "Semakan akhir menggunakan butang, bukan arahan teks. Setiap jana PDF akan mencipta revision baharu."
+        "Had lalai:\n"
+        f"- Maks gambar per isu: {MAX_IMAGES_PER_ISSUE_DEFAULT}\n"
+        f"- Maks isu per laporan: {MAX_ISSUES_PER_REPORT_DEFAULT}\n"
+        f"- Maks jumlah gambar per laporan: {MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT}\n"
+        f"- Maks saiz gambar: {MAX_IMAGE_FILE_SIZE_MB_DEFAULT} MB\n\n"
+        "Semakan akhir menggunakan butang, bukan arahan teks. Setiap jana PDF akan mencipta revision baharu, dan laporan arkib boleh dilihat semula melalui /archived."
     )
 
 

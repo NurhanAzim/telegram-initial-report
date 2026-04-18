@@ -44,6 +44,10 @@ python3 -m pip install -r requirements.txt
 - Optional: `BACKUP_DIR`
 - Optional: `RETENTION_PERIOD_DAYS`
 - Optional: `ARCHIVED_REPORT_RETENTION_DAYS`
+- Optional: `MAX_IMAGES_PER_ISSUE`
+- Optional: `MAX_ISSUES_PER_REPORT`
+- Optional: `MAX_TOTAL_IMAGES_PER_REPORT`
+- Optional: `MAX_IMAGE_FILE_SIZE_MB`
 
 For staging, copy `.env.staging.example` to `.env.staging` or edit the existing local `.env.staging`.
 
@@ -103,6 +107,13 @@ help - Tunjuk panduan ringkas
 - Database backups are stored under `BACKUP_DIR`
 - Generated PDF revisions older than `RETENTION_PERIOD_DAYS` are deleted automatically from Nextcloud
 - Archived or deleted report assets become eligible for local cleanup after `ARCHIVED_REPORT_RETENTION_DAYS`
+
+## Guardrails
+
+- `MAX_IMAGES_PER_ISSUE` limits image count on a single issue
+- `MAX_ISSUES_PER_REPORT` limits issue count in one report
+- `MAX_TOTAL_IMAGES_PER_REPORT` limits image count across the whole report
+- `MAX_IMAGE_FILE_SIZE_MB` limits accepted image size before download
 
 ## Report Lifecycle
 

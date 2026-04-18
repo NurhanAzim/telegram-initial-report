@@ -11,6 +11,8 @@ from telegram_bot import (
     AUTHOR_BACK_LABEL,
     NO_LABEL,
     YES_LABEL,
+    _count_total_images,
+    _extract_image_file,
     _author_reply_keyboard,
     _archived_reports_keyboard,
     _archived_reports_text,
@@ -176,6 +178,23 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertIn("R-7 | Projek Lama | Fasa Arkib | 18/04/2026", text)
         self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Buka R-7")
         self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "archived:edit:7")
+
+    def test_count_total_images_counts_saved_and_current_issue(self) -> None:
+        session = Session(chat_id=1)
+        session.issues = [
+            Issue(description="Isu 1", image_paths=[Path("a.jpg"), Path("b.jpg")]),
+            Issue(description="Isu 2", image_paths=[Path("c.jpg")]),
+        ]
+        session.current_issue.image_paths = [Path("d.jpg")]
+        self.assertEqual(_count_total_images(session), 4)
+
+    def test_extract_image_file_returns_file_size(self) -> None:
+        file_id, suffix, file_size = _extract_image_file(
+            {"document": {"file_id": "123", "file_name": "image.png", "mime_type": "image/png", "file_size": 456}}
+        )
+        self.assertEqual(file_id, "123")
+        self.assertEqual(suffix, ".png")
+        self.assertEqual(file_size, 456)
 
     def test_build_output_paths_uses_pdf_and_docx(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
