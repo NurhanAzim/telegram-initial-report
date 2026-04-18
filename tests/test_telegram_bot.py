@@ -12,9 +12,12 @@ from telegram_bot import (
     NO_LABEL,
     YES_LABEL,
     _author_reply_keyboard,
+    _archived_reports_keyboard,
+    _archived_reports_text,
     _build_output_paths,
     _drafts_keyboard,
     _drafts_text,
+    _ensure_persisted_session,
     _field_selection_keyboard,
     _issue_selection_keyboard,
     _match_author_option,
@@ -24,18 +27,24 @@ from telegram_bot import (
     _review_text,
     _yes_no_reply_keyboard,
 )
-from draft_store import DraftSummary
+from draft_store import DraftStore, DraftSummary
 
 
 class TelegramBotReviewTest(unittest.TestCase):
     def test_parse_callback_data(self) -> None:
         self.assertEqual(_parse_callback_data("review:generate"), ("generate", None))
+        self.assertEqual(_parse_callback_data("review:show_revisions"), ("show_revisions", None))
+        self.assertEqual(_parse_callback_data("review:archive"), ("archive", None))
+        self.assertEqual(_parse_callback_data("review:restore"), ("restore", None))
+        self.assertEqual(_parse_callback_data("review:delete_report"), ("delete_report", None))
         self.assertEqual(_parse_callback_data("review:menu_fields"), ("menu_fields", None))
         self.assertEqual(_parse_callback_data("review:field:date"), ("select_field", "date"))
         self.assertEqual(_parse_callback_data("review:edit_issue:1"), ("select_edit_issue", 1))
         self.assertEqual(_parse_callback_data("review:delete_issue:2"), ("select_delete_issue", 2))
         self.assertEqual(_parse_callback_data("draft:edit:9"), ("draft_edit", 9))
         self.assertEqual(_parse_callback_data("draft:list"), ("draft_list", None))
+        self.assertEqual(_parse_callback_data("archived:edit:9"), ("archived_edit", 9))
+        self.assertEqual(_parse_callback_data("archived:list"), ("archived_list", None))
 
     def test_review_text_contains_summary_and_button_instruction(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -59,7 +68,7 @@ class TelegramBotReviewTest(unittest.TestCase):
 
             text = _review_text(session)
 
-            self.assertIn("Semakan laporan draf #1:", text)
+            self.assertIn("Semakan laporan R-7:", text)
             self.assertIn("1. Tarikh laporan: 16/04/2026", text)
             self.assertIn("1. Kabel belum dirapikan | Lampiran: Foto server rack (2 gambar)", text)
             self.assertIn("2. Label rack belum lengkap (0 gambar)", text)
@@ -79,6 +88,18 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertIn("Edit Butiran", labels)
             self.assertIn("Edit Isu", labels)
             self.assertIn("Padam Isu", labels)
+            self.assertIn("Lihat PDF", labels)
+            self.assertIn("Arkib", labels)
+            self.assertIn("Padam Laporan", labels)
+
+    def test_review_keyboard_for_archived_report_includes_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session = Session(chat_id=1, workspace=Path(temp_dir), report_status="archived")
+            keyboard = _review_keyboard(session)
+            labels = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+            self.assertIn("Lihat PDF", labels)
+            self.assertIn("Pulih", labels)
+            self.assertIn("Padam Laporan", labels)
 
     def test_field_selection_keyboard_uses_numbered_buttons(self) -> None:
         keyboard = _field_selection_keyboard()
@@ -128,13 +149,33 @@ class TelegramBotReviewTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 updated_at="2026-04-16T10:00:00+00:00",
                 created_at="2026-04-16T09:00:00+00:00",
+                current_revision=0,
             )
         ]
         text = _drafts_text(drafts)
         keyboard = _drafts_keyboard(drafts)
-        self.assertIn("#1 | Projek Demo | Fasa 1 | 16/04/2026", text)
-        self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Edit #1")
+        self.assertIn("R-3 | Projek Demo | Fasa 1 | 16/04/2026", text)
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Buka R-3")
         self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "draft:edit:3")
+
+    def test_archived_reports_keyboard_and_text(self) -> None:
+        reports = [
+            DraftSummary(
+                draft_id=7,
+                chat_id=99,
+                date="18/04/2026",
+                project_name="Projek Lama",
+                project_sub_name="Fasa Arkib",
+                updated_at="2026-04-18T10:00:00+00:00",
+                created_at="2026-04-18T09:00:00+00:00",
+                current_revision=2,
+            )
+        ]
+        text = _archived_reports_text(reports)
+        keyboard = _archived_reports_keyboard(reports)
+        self.assertIn("R-7 | Projek Lama | Fasa Arkib | 18/04/2026", text)
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Buka R-7")
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "archived:edit:7")
 
     def test_build_output_paths_uses_pdf_and_docx(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -152,6 +193,19 @@ class TelegramBotReviewTest(unittest.TestCase):
             docx_path, pdf_path = _build_output_paths(session.workspace, payload)
             self.assertEqual(docx_path.suffix, ".docx")
             self.assertEqual(pdf_path.suffix, ".pdf")
+
+    def test_start_session_is_not_persisted_until_first_real_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = Session(chat_id=1, workspace=root / "runtime")
+
+            self.assertEqual(store.list_reports(chat_id=1), [])
+            _ensure_persisted_session(store, session)
+            reports = store.list_reports(chat_id=1)
+
+            self.assertEqual(len(reports), 1)
+            self.assertIsNotNone(session.draft_id)
 
 
 if __name__ == "__main__":

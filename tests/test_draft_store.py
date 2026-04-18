@@ -10,19 +10,19 @@ from report_generator import Issue
 
 
 class DraftStoreTest(unittest.TestCase):
-    def test_create_save_and_load_draft(self) -> None:
+    def test_create_save_and_load_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
 
-            session = store.create_draft(chat_id=123)
+            session = store.create_report(chat_id=123)
             session.data["date"] = "16/04/2026"
             session.data["project_name"] = "Projek Demo"
             session.stage = "review"
             session.issues = [Issue(description="Kabel belum dirapikan", images_description="Foto susulan", image_paths=[])]
             store.save_session(session)
 
-            loaded = store.load_session(chat_id=123, draft_id=session.draft_id or 0)
+            loaded = store.load_report(chat_id=123, report_id=session.draft_id or 0)
 
             self.assertIsNotNone(loaded)
             assert loaded is not None
@@ -31,30 +31,80 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(loaded.issues[0].description, "Kabel belum dirapikan")
             self.assertEqual(loaded.issues[0].images_description, "Foto susulan")
 
-    def test_list_drafts_and_generated_file_retention(self) -> None:
+    def test_list_reports_and_revision_retention(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
 
-            session = store.create_draft(chat_id=123)
+            session = store.create_report(chat_id=123)
             session.data["project_name"] = "Projek Demo"
             session.data["project_sub_name"] = "Fasa 1"
             session.data["date"] = "16/04/2026"
             store.save_session(session)
 
-            drafts = store.list_drafts(chat_id=123)
-            self.assertEqual(len(drafts), 1)
-            self.assertEqual(drafts[0].project_name, "Projek Demo")
+            reports = store.list_reports(chat_id=123)
+            self.assertEqual(len(reports), 1)
+            self.assertEqual(reports[0].project_name, "Projek Demo")
+            self.assertEqual(reports[0].current_revision, 0)
 
-            store.record_generated_file(
+            revision_number = store.record_revision(
                 draft_id=session.draft_id or 0,
+                payload_json="{}",
                 remote_path="InitialReports/report.docx",
                 share_id="55",
                 share_url="https://cloud.example.com/s/demo",
             )
+            self.assertEqual(revision_number, 1)
+
+            revisions = store.list_report_revisions(session.draft_id or 0)
+            self.assertEqual(len(revisions), 1)
+            self.assertEqual(revisions[0].revision_number, 1)
+            self.assertEqual(revisions[0].remote_path, "InitialReports/report.docx")
+
+            reports = store.list_reports(chat_id=123)
+            self.assertEqual(reports[0].current_revision, 1)
+
             expired = store.list_expired_generated_files("9999-01-01T00:00:00+00:00")
             self.assertEqual(len(expired), 1)
-            self.assertEqual(expired[0].remote_path, "InitialReports/report.docx")
+            self.assertEqual(expired[0].revision_number, 1)
+
+    def test_archive_and_delete_remove_from_active_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            report1 = store.create_report(chat_id=123)
+            report1.data["project_name"] = "Report A"
+            store.save_session(report1)
+
+            report2 = store.create_report(chat_id=123)
+            report2.data["project_name"] = "Report B"
+            store.save_session(report2)
+
+            store.archive_report(chat_id=123, report_id=report1.draft_id or 0)
+            store.delete_report(chat_id=123, report_id=report2.draft_id or 0)
+
+            reports = store.list_reports(chat_id=123)
+            self.assertEqual(reports, [])
+            archived = store.list_archived_reports(chat_id=123)
+            self.assertEqual(len(archived), 1)
+            self.assertEqual(archived[0].project_name, "Report A")
+
+    def test_restore_report_moves_it_back_to_active(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            report = store.create_report(chat_id=123)
+            report.data["project_name"] = "Report A"
+            store.save_session(report)
+            store.archive_report(chat_id=123, report_id=report.draft_id or 0)
+            store.restore_report(chat_id=123, report_id=report.draft_id or 0)
+
+            active = store.list_reports(chat_id=123)
+            archived = store.list_archived_reports(chat_id=123)
+            self.assertEqual(len(active), 1)
+            self.assertEqual(len(archived), 0)
 
     def test_migration_table_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -68,7 +118,7 @@ class DraftStoreTest(unittest.TestCase):
             finally:
                 connection.close()
 
-            self.assertEqual([row[0] for row in rows], ["001_init"])
+            self.assertEqual([row[0] for row in rows], ["001_init", "002_reports_and_revisions"])
 
     def test_existing_database_is_backed_up_before_pending_migration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -78,7 +128,41 @@ class DraftStoreTest(unittest.TestCase):
 
             connection = sqlite3.connect(db_path)
             try:
-                connection.execute("CREATE TABLE drafts (id INTEGER PRIMARY KEY)")
+                connection.executescript(
+                    """
+                    CREATE TABLE drafts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        chat_id INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        date TEXT NOT NULL DEFAULT '',
+                        project_name TEXT NOT NULL DEFAULT '',
+                        project_sub_name TEXT NOT NULL DEFAULT '',
+                        state_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        generated_at TEXT
+                    );
+
+                    CREATE TABLE generated_files (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        draft_id INTEGER NOT NULL,
+                        remote_path TEXT NOT NULL,
+                        share_id TEXT,
+                        share_url TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        deleted_at TEXT,
+                        FOREIGN KEY(draft_id) REFERENCES drafts(id)
+                    );
+
+                    CREATE TABLE schema_migrations (
+                        version TEXT PRIMARY KEY,
+                        applied_at TEXT NOT NULL
+                    );
+                    """
+                )
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES ('001_init', '2026-04-18T00:00:00+00:00')"
+                )
                 connection.commit()
             finally:
                 connection.close()
@@ -89,10 +173,10 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(len(backups), 1)
             connection = sqlite3.connect(store.db_path)
             try:
-                versions = connection.execute("SELECT version FROM schema_migrations").fetchall()
+                versions = connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
             finally:
                 connection.close()
-            self.assertEqual([row[0] for row in versions], ["001_init"])
+            self.assertEqual([row[0] for row in versions], ["001_init", "002_reports_and_revisions"])
 
 
 if __name__ == "__main__":

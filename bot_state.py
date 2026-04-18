@@ -18,6 +18,8 @@ class Session:
     chat_id: int
     draft_id: int | None = None
     display_number: int | None = None
+    list_message_id: int | None = None
+    report_status: str = "active"
     field_index: int = 0
     data: dict[str, str] = field(default_factory=dict)
     issues: list[Issue] = field(default_factory=list)

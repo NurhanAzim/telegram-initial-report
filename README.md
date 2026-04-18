@@ -43,6 +43,7 @@ python3 -m pip install -r requirements.txt
 - Optional: `DRAFTS_DIR`
 - Optional: `BACKUP_DIR`
 - Optional: `RETENTION_PERIOD_DAYS`
+- Optional: `ARCHIVED_REPORT_RETENTION_DAYS`
 
 For staging, copy `.env.staging.example` to `.env.staging` or edit the existing local `.env.staging`.
 
@@ -63,16 +64,22 @@ python3 telegram_bot.py
    `report_purpose`: short purpose sentence
    `report_author`: choose from the keyboard buttons
 3. Send one issue description
-4. Send one or more images for that issue
-5. Send `/done`
-6. Use the keyboard buttons `Ya` or `Tidak` to continue or open review
-7. In review, use the inline buttons in the chat:
+4. Optionally send attachment description text for that issue, or send `/skip`
+5. Send one or more images for that issue
+6. Send `/done`
+7. Use the keyboard buttons `Ya` or `Tidak` to continue or open review
+8. In review, use the inline buttons in the chat:
    `Jana Laporan`
+   `Lihat PDF`
+   `Arkib`
+   `Padam Laporan`
    `Tambah Isu`
    `Edit Butiran` then pick `1-6`
    `Edit Isu` then pick issue number `1..n`
    `Padam Isu` then pick issue number `1..n`
-8. Reopen an unfinished draft later with `/drafts` or `/edit <nombor draf>`
+9. After generation, the bot opens the PDF revision view directly
+10. Reopen an active report later with `/reports` or the `Buka R-<id>` button
+11. View archived reports later with `/archived`
 
 If there is no issue at all, send `/done` when the bot asks for the first issue description.
 
@@ -82,19 +89,30 @@ The bot syncs these commands automatically on startup via `setMyCommands`, but i
 
 ```text
 start - Mula laporan baru
-drafts - Senarai draf belum siap
-edit - Buka draf ikut nombor draf
+reports - Senarai laporan aktif
+archived - Senarai laporan arkib
 done - Selesai untuk langkah semasa
-cancel - Batal sesi semasa
+cancel - Padam laporan semasa
 help - Tunjuk panduan ringkas
 ```
 
 ## Persistence
 
-- Drafts are stored in SQLite at `DATABASE_PATH`
-- Saved draft assets are stored under `DRAFTS_DIR`
+- Active reports are stored in SQLite at `DATABASE_PATH`
+- Local report source assets are stored under `DRAFTS_DIR`
 - Database backups are stored under `BACKUP_DIR`
-- Generated Nextcloud PDFs older than `RETENTION_PERIOD_DAYS` are deleted automatically
+- Generated PDF revisions older than `RETENTION_PERIOD_DAYS` are deleted automatically from Nextcloud
+- Archived or deleted report assets become eligible for local cleanup after `ARCHIVED_REPORT_RETENTION_DAYS`
+
+## Report Lifecycle
+
+- A report stays editable after PDF generation
+- Each PDF generation creates a new immutable revision
+- `/reports` shows active editable reports
+- `/archived` shows archived reports
+- Reports leave the active list only when archived or deleted
+- Archived reports can be restored back to active
+- Old PDF revisions can expire while the editable report remains
 
 ## Migrations
 
@@ -160,6 +178,7 @@ Create a payload JSON:
   "issues": [
     {
       "description": "Kabel belum dirapikan",
+      "images_description": "Foto susulan tapak",
       "image_paths": ["./sample.png"]
     }
   ]
