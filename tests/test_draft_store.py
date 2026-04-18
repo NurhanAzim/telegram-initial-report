@@ -30,6 +30,7 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(loaded.stage, "review")
             self.assertEqual(loaded.issues[0].description, "Kabel belum dirapikan")
             self.assertEqual(loaded.issues[0].images_description, "Foto susulan")
+            self.assertEqual(store.list_report_assets(session.draft_id or 0), [])
 
     def test_list_reports_and_revision_retention(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -67,6 +68,34 @@ class DraftStoreTest(unittest.TestCase):
             expired = store.list_expired_generated_files("9999-01-01T00:00:00+00:00")
             self.assertEqual(len(expired), 1)
             self.assertEqual(expired[0].revision_number, 1)
+
+    def test_report_assets_are_tracked_and_cleaned_up(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            image1 = session.workspace / "issue-1-1.jpg"
+            image2 = session.workspace / "issue-2-1.jpg"
+            image1.parent.mkdir(parents=True, exist_ok=True)
+            image1.write_text("x", encoding="utf-8")
+            image2.write_text("y", encoding="utf-8")
+            session.issues = [
+                Issue(description="Isu 1", images_description="", image_paths=[image1]),
+                Issue(description="Isu 2", images_description="", image_paths=[image2]),
+            ]
+            store.save_session(session)
+
+            assets = store.list_report_assets(session.draft_id or 0)
+            self.assertEqual(len(assets), 2)
+            self.assertEqual(assets[0].local_path, str(image1))
+
+            store.archive_report(chat_id=123, report_id=session.draft_id or 0)
+            store.cleanup_report_assets(session.draft_id or 0, str(session.workspace))
+
+            self.assertFalse(image1.exists())
+            self.assertFalse(image2.exists())
+            self.assertEqual(store.list_report_assets(session.draft_id or 0), [])
 
     def test_archive_and_delete_remove_from_active_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -118,7 +147,7 @@ class DraftStoreTest(unittest.TestCase):
             finally:
                 connection.close()
 
-            self.assertEqual([row[0] for row in rows], ["001_init", "002_reports_and_revisions"])
+            self.assertEqual([row[0] for row in rows], ["001_init", "002_reports_and_revisions", "003_report_assets"])
 
     def test_existing_database_is_backed_up_before_pending_migration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -176,7 +205,7 @@ class DraftStoreTest(unittest.TestCase):
                 versions = connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
             finally:
                 connection.close()
-            self.assertEqual([row[0] for row in versions], ["001_init", "002_reports_and_revisions"])
+            self.assertEqual([row[0] for row in versions], ["001_init", "002_reports_and_revisions", "003_report_assets"])
 
 
 if __name__ == "__main__":

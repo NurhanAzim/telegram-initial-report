@@ -44,6 +44,15 @@ class CleanupTarget:
     effective_at: str
 
 
+@dataclass(slots=True)
+class ReportAsset:
+    report_id: int
+    issue_index: int
+    asset_kind: str
+    local_path: str
+    created_at: str
+
+
 SCHEMA_MIGRATIONS: list[tuple[str, str]] = [
     (
         "001_init",
@@ -120,6 +129,24 @@ SCHEMA_MIGRATIONS: list[tuple[str, str]] = [
             FROM generated_files gf
             WHERE gf.draft_id = drafts.id
         );
+        """,
+    ),
+    (
+        "003_report_assets",
+        """
+        CREATE TABLE IF NOT EXISTS report_assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id INTEGER NOT NULL,
+            issue_index INTEGER NOT NULL,
+            asset_kind TEXT NOT NULL,
+            local_path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            deleted_at TEXT,
+            FOREIGN KEY(report_id) REFERENCES drafts(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_report_assets_report_id
+        ON report_assets(report_id);
         """,
     ),
 ]
@@ -199,6 +226,7 @@ class DraftStore:
                     session.chat_id,
                 ),
             )
+            self._replace_report_assets(connection, session)
 
     def load_session(self, chat_id: int, draft_id: int) -> Session | None:
         return self.load_report(chat_id, draft_id)
@@ -439,11 +467,28 @@ class DraftStore:
         return targets
 
     def cleanup_report_assets(self, report_id: int, workspace: str) -> None:
-        if workspace:
-            path = Path(workspace)
-            if path.exists():
-                shutil.rmtree(path, ignore_errors=True)
         with self._connection() as connection:
+            assets = connection.execute(
+                """
+                SELECT local_path
+                FROM report_assets
+                WHERE report_id = ? AND deleted_at IS NULL
+                """,
+                (report_id,),
+            ).fetchall()
+            for row in assets:
+                path = Path(row["local_path"])
+                try:
+                    if path.exists():
+                        path.unlink()
+                except IsADirectoryError:
+                    shutil.rmtree(path, ignore_errors=True)
+                except Exception:
+                    pass
+            connection.execute(
+                "UPDATE report_assets SET deleted_at = ? WHERE report_id = ? AND deleted_at IS NULL",
+                (_now_iso(), report_id),
+            )
             row = connection.execute("SELECT state_json FROM drafts WHERE id = ?", (report_id,)).fetchone()
             if row is None:
                 return
@@ -462,6 +507,33 @@ class DraftStore:
                 "UPDATE drafts SET state_json = ?, updated_at = ? WHERE id = ?",
                 (json.dumps(state), _now_iso(), report_id),
             )
+
+        if workspace:
+            path = Path(workspace)
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
+
+    def list_report_assets(self, report_id: int) -> list[ReportAsset]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT report_id, issue_index, asset_kind, local_path, created_at
+                FROM report_assets
+                WHERE report_id = ? AND deleted_at IS NULL
+                ORDER BY issue_index, local_path
+                """,
+                (report_id,),
+            ).fetchall()
+        return [
+            ReportAsset(
+                report_id=int(row["report_id"]),
+                issue_index=int(row["issue_index"]),
+                asset_kind=row["asset_kind"],
+                local_path=row["local_path"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
 
     def _serialize_session(self, session: Session) -> dict:
         return {
@@ -487,6 +559,28 @@ class DraftStore:
             "list_message_id": session.list_message_id,
             "workspace": str(session.workspace),
         }
+
+    def _replace_report_assets(self, connection: sqlite3.Connection, session: Session) -> None:
+        if session.draft_id is None:
+            return
+
+        connection.execute("DELETE FROM report_assets WHERE report_id = ?", (session.draft_id,))
+        now = _now_iso()
+        asset_rows: list[tuple[int, int, str, str, str]] = []
+        for issue_index, issue in enumerate(session.issues):
+            for path in issue.image_paths:
+                asset_rows.append((session.draft_id, issue_index, "issue_image", str(path), now))
+        for path in session.current_issue.image_paths:
+            asset_rows.append((session.draft_id, -1, "issue_image", str(path), now))
+
+        if asset_rows:
+            connection.executemany(
+                """
+                INSERT INTO report_assets (report_id, issue_index, asset_kind, local_path, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                asset_rows,
+            )
 
     def _deserialize_session(self, chat_id: int, draft_id: int, state: dict, report_status: str = "active") -> Session:
         workspace_raw = state.get("workspace") or str(self._workspace_for(draft_id))
