@@ -25,6 +25,7 @@ HOUSEKEEPING_INTERVAL_SECONDS = 3600
 ENV_PATH = Path(".env")
 TEMPLATE_PATH = Path("Template Initial Report.docx")
 ARCHIVED_REPORT_RETENTION_DAYS_DEFAULT = 30
+AUTO_ARCHIVE_ACTIVE_REPORT_DAYS_DEFAULT = 0
 MAX_IMAGES_PER_ISSUE_DEFAULT = 10
 MAX_ISSUES_PER_REPORT_DEFAULT = 20
 MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT = 40
@@ -144,6 +145,9 @@ def main() -> None:
     backup_dir = Path(os.getenv("BACKUP_DIR", str(data_dir / "backups"))).resolve()
     retention_days = int(os.getenv("RETENTION_PERIOD_DAYS", "14"))
     archived_report_retention_days = int(os.getenv("ARCHIVED_REPORT_RETENTION_DAYS", str(ARCHIVED_REPORT_RETENTION_DAYS_DEFAULT)))
+    auto_archive_active_report_days = int(
+        os.getenv("AUTO_ARCHIVE_ACTIVE_REPORT_DAYS", str(AUTO_ARCHIVE_ACTIVE_REPORT_DAYS_DEFAULT))
+    )
     max_images_per_issue = int(os.getenv("MAX_IMAGES_PER_ISSUE", str(MAX_IMAGES_PER_ISSUE_DEFAULT)))
     max_issues_per_report = int(os.getenv("MAX_ISSUES_PER_REPORT", str(MAX_ISSUES_PER_REPORT_DEFAULT)))
     max_total_images_per_report = int(os.getenv("MAX_TOTAL_IMAGES_PER_REPORT", str(MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT)))
@@ -159,7 +163,13 @@ def main() -> None:
     client = TelegramBotClient(token)
     client.set_my_commands()
 
-    _run_housekeeping(store, nextcloud, retention_days, archived_report_retention_days)
+    _run_housekeeping(
+        store,
+        nextcloud,
+        retention_days,
+        archived_report_retention_days,
+        auto_archive_active_report_days,
+    )
     next_housekeeping_at = time.monotonic() + HOUSEKEEPING_INTERVAL_SECONDS
     sessions: dict[int, Session] = {}
     next_offset: int | None = None
@@ -167,7 +177,13 @@ def main() -> None:
     while True:
         try:
             if time.monotonic() >= next_housekeeping_at:
-                _run_housekeeping(store, nextcloud, retention_days, archived_report_retention_days)
+                _run_housekeeping(
+                    store,
+                    nextcloud,
+                    retention_days,
+                    archived_report_retention_days,
+                    auto_archive_active_report_days,
+                )
                 next_housekeeping_at = time.monotonic() + HOUSEKEEPING_INTERVAL_SECONDS
 
             updates = client.get_updates(next_offset)
@@ -694,6 +710,11 @@ def _handle_callback_query(
         _show_report_revisions(client, store, session)
         return
 
+    if action == "expired_revision" and isinstance(value, int):
+        client.answer_callback_query(callback_id, "Revision itu sudah luput.")
+        _show_report_revisions(client, store, session, prefix=_expired_revision_prefix(value))
+        return
+
     if action == "archive":
         client.answer_callback_query(callback_id, "Mengarkib laporan...")
         if session.draft_id is not None:
@@ -953,7 +974,7 @@ def _show_report_revisions(
     lines = [f"PDF revision untuk {_draft_label_for_session(session)}:"]
     for revision in revisions:
         lines.append(
-            f"Revision {revision.revision_number} | {revision.status} | {_format_timestamp(revision.created_at)}"
+            f"Revision {revision.revision_number} | {_revision_status_label(revision.status)} | {_format_timestamp(revision.created_at)}"
         )
     _set_review_message(
         client,
@@ -1195,9 +1216,30 @@ def _revision_keyboard(revisions: list[GeneratedFileRecord]) -> dict:
         if revision.status == "available":
             rows.append([_url_button(f"Revision {revision.revision_number}", revision.share_url)])
         else:
-            rows.append([_button(f"Revision {revision.revision_number} ({revision.status})", f"{REVIEW_CALLBACK_PREFIX}:show")])
+            rows.append(
+                [
+                    _button(
+                        f"Revision {revision.revision_number} (luput)",
+                        f"{REVIEW_CALLBACK_PREFIX}:expired_revision:{revision.revision_number}",
+                    )
+                ]
+            )
     rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
     return {"inline_keyboard": rows}
+
+
+def _revision_status_label(status: str) -> str:
+    return {
+        "available": "Tersedia",
+        "expired": "Luput",
+    }.get(status, status)
+
+
+def _expired_revision_prefix(revision_number: int) -> str:
+    return (
+        f"Revision {revision_number} telah luput dan fail PDF itu sudah dipadam.\n"
+        "Pilih revision lain yang masih tersedia, atau tekan Kembali untuk jana PDF baharu.\n\n"
+    )
 
 
 def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
@@ -1209,6 +1251,8 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
     if prefix == REVIEW_CALLBACK_PREFIX:
         if action in {"generate", "back", "show", "add_issue", "menu_fields", "menu_edit_issues", "menu_delete_issues", "show_revisions", "archive", "restore", "delete_report"}:
             return action, None
+        if action == "expired_revision" and len(parts) >= 3 and parts[2].isdigit():
+            return "expired_revision", int(parts[2])
         if action == "field" and len(parts) >= 3:
             return "select_field", parts[2]
         if action == "edit_issue" and len(parts) >= 3 and parts[2].isdigit():
@@ -1318,6 +1362,7 @@ def _run_housekeeping(
     nextcloud: NextcloudClient,
     retention_days: int,
     archived_report_retention_days: int,
+    auto_archive_active_report_days: int,
 ) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     expired = store.list_expired_generated_files(cutoff)
@@ -1333,6 +1378,12 @@ def _run_housekeeping(
             store.mark_generated_file_deleted(record.record_id)
         except Exception:
             LOGGER.exception("Failed housekeeping for generated file record %s", record.record_id)
+
+    if auto_archive_active_report_days > 0:
+        archive_active_cutoff = (datetime.now(timezone.utc) - timedelta(days=auto_archive_active_report_days)).isoformat()
+        archived_ids = store.auto_archive_stale_reports(archive_active_cutoff)
+        if archived_ids:
+            LOGGER.info("Auto-archived %s stale active report(s)", len(archived_ids))
 
     archive_cutoff = (datetime.now(timezone.utc) - timedelta(days=archived_report_retention_days)).isoformat()
     cleanup_targets = store.list_reports_for_asset_cleanup(archive_cutoff)
@@ -1392,10 +1443,10 @@ def _help_text() -> str:
         "- Selepas keterangan isu, bot akan minta keterangan lampiran\n"
         "- Balas /skip jika tiada keterangan lampiran tambahan\n\n"
         "Had lalai:\n"
-        f"- Maks gambar per isu: {MAX_IMAGES_PER_ISSUE_DEFAULT}\n"
-        f"- Maks isu per laporan: {MAX_ISSUES_PER_REPORT_DEFAULT}\n"
-        f"- Maks jumlah gambar per laporan: {MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT}\n"
-        f"- Maks saiz gambar: {MAX_IMAGE_FILE_SIZE_MB_DEFAULT} MB\n\n"
+        f"- Max gambar per isu: {MAX_IMAGES_PER_ISSUE_DEFAULT}\n"
+        f"- Max isu per laporan: {MAX_ISSUES_PER_REPORT_DEFAULT}\n"
+        f"- Max jumlah gambar per laporan: {MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT}\n"
+        f"- Max saiz gambar: {MAX_IMAGE_FILE_SIZE_MB_DEFAULT} MB\n\n"
         "Semakan akhir menggunakan butang, bukan arahan teks. Setiap jana PDF akan mencipta revision baharu, dan laporan arkib boleh dilihat semula melalui /archived."
     )
 

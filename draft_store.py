@@ -326,6 +326,34 @@ class DraftStore:
                 (now, report_id, chat_id),
             )
 
+    def auto_archive_stale_reports(self, cutoff_iso: str) -> list[int]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT id
+                FROM drafts
+                WHERE status = 'active'
+                  AND current_revision > 0
+                  AND updated_at < ?
+                """,
+                (cutoff_iso,),
+            ).fetchall()
+            report_ids = [int(row["id"]) for row in rows]
+            if not report_ids:
+                return []
+
+            now = _now_iso()
+            connection.executemany(
+                """
+                UPDATE drafts
+                SET status = 'archived', archived_at = ?, updated_at = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                [(now, now, report_id) for report_id in report_ids],
+            )
+
+        return report_ids
+
     def mark_generated(self, chat_id: int, draft_id: int) -> None:
         # compatibility no-op: reports remain active after generation
         return

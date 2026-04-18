@@ -24,12 +24,13 @@ from telegram_bot import (
     _issue_selection_keyboard,
     _match_author_option,
     _parse_callback_data,
+    _revision_keyboard,
     _remove_reply_keyboard,
     _review_keyboard,
     _review_text,
     _yes_no_reply_keyboard,
 )
-from draft_store import DraftStore, DraftSummary
+from draft_store import DraftStore, DraftSummary, GeneratedFileRecord
 
 
 class TelegramBotReviewTest(unittest.TestCase):
@@ -39,6 +40,7 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(_parse_callback_data("review:archive"), ("archive", None))
         self.assertEqual(_parse_callback_data("review:restore"), ("restore", None))
         self.assertEqual(_parse_callback_data("review:delete_report"), ("delete_report", None))
+        self.assertEqual(_parse_callback_data("review:expired_revision:3"), ("expired_revision", 3))
         self.assertEqual(_parse_callback_data("review:menu_fields"), ("menu_fields", None))
         self.assertEqual(_parse_callback_data("review:field:date"), ("select_field", "date"))
         self.assertEqual(_parse_callback_data("review:edit_issue:1"), ("select_edit_issue", 1))
@@ -178,6 +180,37 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertIn("R-7 | Projek Lama | Fasa Arkib | 18/04/2026", text)
         self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Buka R-7")
         self.assertEqual(keyboard["inline_keyboard"][0][0]["callback_data"], "archived:edit:7")
+
+    def test_revision_keyboard_marks_expired_revisions_clearly(self) -> None:
+        revisions = [
+            GeneratedFileRecord(
+                record_id=1,
+                draft_id=7,
+                revision_number=2,
+                remote_path="InitialReports/report-2.pdf",
+                share_id="share-2",
+                share_url="https://cloud.example.com/s/rev2",
+                created_at="2026-04-18T10:00:00+00:00",
+                status="available",
+            ),
+            GeneratedFileRecord(
+                record_id=2,
+                draft_id=7,
+                revision_number=1,
+                remote_path="InitialReports/report-1.pdf",
+                share_id="share-1",
+                share_url="https://cloud.example.com/s/rev1",
+                created_at="2026-04-17T10:00:00+00:00",
+                status="expired",
+            ),
+        ]
+
+        keyboard = _revision_keyboard(revisions)
+
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["text"], "Revision 2")
+        self.assertEqual(keyboard["inline_keyboard"][0][0]["url"], "https://cloud.example.com/s/rev2")
+        self.assertEqual(keyboard["inline_keyboard"][1][0]["text"], "Revision 1 (luput)")
+        self.assertEqual(keyboard["inline_keyboard"][1][0]["callback_data"], "review:expired_revision:1")
 
     def test_count_total_images_counts_saved_and_current_issue(self) -> None:
         session = Session(chat_id=1)

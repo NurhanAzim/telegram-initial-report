@@ -135,6 +135,38 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(len(active), 1)
             self.assertEqual(len(archived), 0)
 
+    def test_auto_archive_stale_reports_only_targets_generated_active_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            stale_generated = store.create_report(chat_id=123)
+            stale_generated.data["project_name"] = "Generated"
+            store.save_session(stale_generated)
+            store.record_revision(
+                draft_id=stale_generated.draft_id or 0,
+                payload_json="{}",
+                remote_path="InitialReports/generated.pdf",
+                share_id="1",
+                share_url="https://cloud.example.com/s/generated",
+            )
+
+            stale_unfinished = store.create_report(chat_id=123)
+            stale_unfinished.data["project_name"] = "Unfinished"
+            store.save_session(stale_unfinished)
+
+            with store._connection() as connection:
+                connection.execute(
+                    "UPDATE drafts SET updated_at = ? WHERE id IN (?, ?)",
+                    ("2026-04-01T00:00:00+00:00", stale_generated.draft_id, stale_unfinished.draft_id),
+                )
+
+            archived_ids = store.auto_archive_stale_reports("2026-04-10T00:00:00+00:00")
+
+            self.assertEqual(archived_ids, [stale_generated.draft_id])
+            self.assertEqual(store.list_reports(chat_id=123)[0].project_name, "Unfinished")
+            self.assertEqual(store.list_archived_reports(chat_id=123)[0].project_name, "Generated")
+
     def test_migration_table_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

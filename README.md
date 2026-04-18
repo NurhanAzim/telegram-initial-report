@@ -44,6 +44,7 @@ python3 -m pip install -r requirements.txt
 - Optional: `BACKUP_DIR`
 - Optional: `RETENTION_PERIOD_DAYS`
 - Optional: `ARCHIVED_REPORT_RETENTION_DAYS`
+- Optional: `AUTO_ARCHIVE_ACTIVE_REPORT_DAYS`
 - Optional: `MAX_IMAGES_PER_ISSUE`
 - Optional: `MAX_ISSUES_PER_REPORT`
 - Optional: `MAX_TOTAL_IMAGES_PER_REPORT`
@@ -106,6 +107,7 @@ help - Tunjuk panduan ringkas
 - Local report source assets are stored under `DRAFTS_DIR`
 - Database backups are stored under `BACKUP_DIR`
 - Generated PDF revisions older than `RETENTION_PERIOD_DAYS` are deleted automatically from Nextcloud
+- Active reports with at least one generated revision can be auto-archived after `AUTO_ARCHIVE_ACTIVE_REPORT_DAYS` of inactivity; `0` disables it
 - Archived or deleted report assets become eligible for local cleanup after `ARCHIVED_REPORT_RETENTION_DAYS`
 
 ## Guardrails
@@ -124,6 +126,7 @@ help - Tunjuk panduan ringkas
 - Reports leave the active list only when archived or deleted
 - Archived reports can be restored back to active
 - Old PDF revisions can expire while the editable report remains
+- Expired revisions stay visible in the revision list with a clear recovery message
 
 ## Migrations
 
