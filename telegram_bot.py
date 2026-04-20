@@ -49,6 +49,8 @@ from telegram_ui import (
     _draft_label_for_session,
     _drafts_keyboard,
     _drafts_text,
+    _delete_issue_confirmation_keyboard,
+    _delete_report_confirmation_keyboard,
     _expired_revision_prefix,
     _field_prompt,
     _field_selection_keyboard,
@@ -446,6 +448,7 @@ def _handle_callback_query(
         session.stage = "review"
         session.edit_field_key = None
         session.edit_issue_index = None
+        session.delete_issue_index = None
         store.save_session(session)
         _show_review(client, store, session)
         return
@@ -484,8 +487,30 @@ def _handle_callback_query(
         return
 
     if action == "delete_report":
+        client.answer_callback_query(callback_id)
+        session.stage = "confirm_delete_report"
+        session.delete_issue_index = None
+        store.save_session(session)
+        _set_review_message(
+            client,
+            store,
+            session,
+            "Anda pasti mahu padam laporan ini?\nTindakan ini tidak boleh dibatalkan.",
+            _delete_report_confirmation_keyboard(),
+        )
+        return
+
+    if action == "confirm_delete_report":
         client.answer_callback_query(callback_id, "Memadam laporan...")
         _cancel_session(client, store, sessions, session)
+        return
+
+    if action == "cancel_delete_report":
+        client.answer_callback_query(callback_id)
+        session.stage = "review"
+        session.delete_issue_index = None
+        store.save_session(session)
+        _show_review(client, store, session, prefix="Padam laporan dibatalkan.\n\n")
         return
 
     if action == "add_issue":
@@ -507,6 +532,9 @@ def _handle_callback_query(
 
     if action == "menu_delete_issues":
         client.answer_callback_query(callback_id)
+        session.stage = "review"
+        session.delete_issue_index = None
+        store.save_session(session)
         _show_issue_selection_menu(client, store, session, "delete")
         return
 
@@ -563,10 +591,39 @@ def _handle_callback_query(
         if value >= len(session.issues):
             _show_review(client, store, session, prefix=f"Isu {value + 1} tidak wujud.\n\n")
             return
+        session.stage = "confirm_delete_issue"
+        session.delete_issue_index = value
+        store.save_session(session)
+        _set_review_message(
+            client,
+            store,
+            session,
+            f'Anda pasti mahu padam isu {value + 1}?\n"{session.issues[value].description}"',
+            _delete_issue_confirmation_keyboard(value),
+        )
+        return
+
+    if action == "confirm_delete_issue" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        if session.delete_issue_index != value or value >= len(session.issues):
+            session.stage = "review"
+            session.delete_issue_index = None
+            store.save_session(session)
+            _show_review(client, store, session, prefix="Isu itu tidak lagi tersedia untuk dipadam.\n\n")
+            return
         removed = session.issues.pop(value)
         session.stage = "review"
+        session.delete_issue_index = None
         store.save_session(session)
         _show_review(client, store, session, prefix=f'Isu {value + 1} dibuang: "{removed.description}"\n\n')
+        return
+
+    if action == "cancel_delete_issue":
+        client.answer_callback_query(callback_id)
+        session.stage = "review"
+        session.delete_issue_index = None
+        store.save_session(session)
+        _show_issue_selection_menu(client, store, session, "delete", prefix="Padam isu dibatalkan.\n\n")
         return
 
     client.answer_callback_query(callback_id)
@@ -704,12 +761,18 @@ def _set_review_message(
         store.save_session(session)
 
 
-def _show_issue_selection_menu(client: TelegramBotClient, store: DraftStore, session: Session, mode: str) -> None:
+def _show_issue_selection_menu(
+    client: TelegramBotClient,
+    store: DraftStore,
+    session: Session,
+    mode: str,
+    prefix: str = "",
+) -> None:
     if not session.issues:
         _show_review(client, store, session, prefix="Tiada isu untuk dipilih.\n\n")
         return
     title = "Pilih isu yang mahu diubah:" if mode == "edit" else "Pilih isu yang mahu dibuang:"
-    _set_review_message(client, store, session, title, _issue_selection_keyboard(session, mode))
+    _set_review_message(client, store, session, f"{prefix}{title}", _issue_selection_keyboard(session, mode))
 
 
 def _dismiss_reply_keyboard(client: TelegramBotClient, chat_id: int) -> None:

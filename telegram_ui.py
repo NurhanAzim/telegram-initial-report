@@ -188,6 +188,24 @@ def _back_to_review_keyboard() -> dict:
     return {"inline_keyboard": [[_button("Kembali ke Semakan", f"{REVIEW_CALLBACK_PREFIX}:back")]]}
 
 
+def _delete_report_confirmation_keyboard() -> dict:
+    return {
+        "inline_keyboard": [
+            [_button("Ya, Padam Laporan", f"{REVIEW_CALLBACK_PREFIX}:confirm_delete_report")],
+            [_button("Batal", f"{REVIEW_CALLBACK_PREFIX}:cancel_delete_report")],
+        ]
+    }
+
+
+def _delete_issue_confirmation_keyboard(issue_index: int) -> dict:
+    return {
+        "inline_keyboard": [
+            [_button("Ya, Padam Isu Ini", f"{REVIEW_CALLBACK_PREFIX}:confirm_delete_issue:{issue_index}")],
+            [_button("Batal", f"{REVIEW_CALLBACK_PREFIX}:cancel_delete_issue")],
+        ]
+    }
+
+
 def _button(text: str, callback_data: str) -> dict:
     return {"text": text, "callback_data": callback_data}
 
@@ -265,7 +283,22 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
 
     prefix, action = parts[0], parts[1]
     if prefix == REVIEW_CALLBACK_PREFIX:
-        if action in {"generate", "back", "show", "add_issue", "menu_fields", "menu_edit_issues", "menu_delete_issues", "show_revisions", "archive", "restore", "delete_report"}:
+        if action in {
+            "generate",
+            "back",
+            "show",
+            "add_issue",
+            "menu_fields",
+            "menu_edit_issues",
+            "menu_delete_issues",
+            "show_revisions",
+            "archive",
+            "restore",
+            "delete_report",
+            "confirm_delete_report",
+            "cancel_delete_report",
+            "cancel_delete_issue",
+        }:
             return action, None
         if action == "expired_revision" and len(parts) >= 3 and parts[2].isdigit():
             return "expired_revision", int(parts[2])
@@ -275,6 +308,8 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
             return "select_edit_issue", int(parts[2])
         if action == "delete_issue" and len(parts) >= 3 and parts[2].isdigit():
             return "select_delete_issue", int(parts[2])
+        if action == "confirm_delete_issue" and len(parts) >= 3 and parts[2].isdigit():
+            return "confirm_delete_issue", int(parts[2])
         return "unknown", None
 
     if prefix == DRAFT_CALLBACK_PREFIX:

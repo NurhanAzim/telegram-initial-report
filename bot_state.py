@@ -27,5 +27,6 @@ class Session:
     stage: str = "field"
     edit_field_key: str | None = None
     edit_issue_index: int | None = None
+    delete_issue_index: int | None = None
     review_message_id: int | None = None
     workspace: Path = Path("runtime")
