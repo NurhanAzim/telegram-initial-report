@@ -17,6 +17,7 @@ from docx.text.paragraph import Paragraph
 
 IMAGE_MAX_HEIGHT = Cm(7)
 ISSUE_DESCRIPTION_TOKEN = "<issue_description>"
+ISSUE_IMAGES_DESCRIPTION_TOKEN = "<issue_images_description>"
 ISSUE_IMAGES_TOKEN = "<issue_images>"
 VERIFIER_NAME = "KHAIRUL ANUAR JOHARI"
 
@@ -35,6 +36,8 @@ class ReportData:
     project_sub_name: str
     report_title: str
     report_purpose: str
+    report_action: str
+    report_conclusion: str
     report_author: str
     report_author_role: str
     issues: list[Issue] = field(default_factory=list)
@@ -55,6 +58,8 @@ class ReportData:
             project_sub_name=payload["project_sub_name"].strip(),
             report_title=payload["report_title"].strip(),
             report_purpose=payload["report_purpose"].strip(),
+            report_action=payload.get("report_action", "").strip(),
+            report_conclusion=payload.get("report_conclusion", "").strip(),
             report_author=payload["report_author"].strip(),
             report_author_role=payload["report_author_role"].strip(),
             issues=issues,
@@ -67,6 +72,8 @@ class ReportData:
             "project_sub_name": self.project_sub_name,
             "report_title": self.report_title,
             "report_purpose": self.report_purpose,
+            "report_action": self.report_action,
+            "report_conclusion": self.report_conclusion,
             "report_author": self.report_author,
             "report_author_role": self.report_author_role,
         }
@@ -78,7 +85,14 @@ def render_report(
     report: ReportData,
 ) -> Path:
     document = Document(str(template_path))
-    _populate_issue_table(document, report.issues)
+    _populate_repeating_table(
+        document,
+        report.issues,
+        ISSUE_DESCRIPTION_TOKEN,
+        ISSUE_IMAGES_DESCRIPTION_TOKEN,
+        ISSUE_IMAGES_TOKEN,
+        "Tiada isu dalam pemantauan.",
+    )
     _replace_scalar_placeholders(document, report.placeholder_map())
     if report.report_author == VERIFIER_NAME:
         _remove_verifier_section(document)
@@ -149,43 +163,55 @@ def _remove_verifier_section(document: DocxDocument) -> None:
             parent.remove(element)
 
 
-def _populate_issue_table(document: DocxDocument, issues: list[Issue]) -> None:
-    table = _find_issue_table(document)
+def _populate_repeating_table(
+    document: DocxDocument,
+    entries: list[Issue],
+    description_token: str,
+    images_description_token: str,
+    images_token: str,
+    empty_description: str,
+) -> None:
+    table = _find_repeating_table(document, description_token, images_description_token, images_token)
     if table is None:
-        raise ValueError("Issue table placeholder was not found in the template.")
+        raise ValueError(f"Table placeholder was not found in the template for {description_token}.")
 
-    issue_rows = table.rows[1:]
-    if not issue_rows:
+    entry_rows = table.rows[1:]
+    if not entry_rows:
         raise ValueError("Issue table block is missing from the template.")
 
-    template_block = [deepcopy(row._tr) for row in issue_rows]
+    template_block = [deepcopy(row._tr) for row in entry_rows]
     while len(table.rows) > 1:
         table._tbl.remove(table.rows[1]._tr)
 
-    effective_issues = issues or [Issue(description="Tiada isu dalam pemantauan.", image_paths=[])]
+    effective_entries = entries or [Issue(description=empty_description, image_paths=[])]
     block_size = len(template_block)
 
-    for index, issue in enumerate(effective_issues):
+    for index, entry in enumerate(effective_entries):
         for row_xml in deepcopy(template_block):
             table._tbl.append(row_xml)
         row_start = 1 + (index * block_size)
-        _fill_issue_block(table, row_start, issue)
+        _fill_entry_block(table, row_start, entry)
 
 
-def _find_issue_table(document: DocxDocument) -> Table | None:
+def _find_repeating_table(
+    document: DocxDocument,
+    description_token: str,
+    images_description_token: str,
+    images_token: str,
+) -> Table | None:
     for table in document.tables:
         text = "\n".join(cell.text for row in table.rows for cell in row.cells)
-        if ISSUE_DESCRIPTION_TOKEN in text and ISSUE_IMAGES_TOKEN in text:
+        if description_token in text and images_description_token in text and images_token in text:
             return table
     return None
 
 
-def _fill_issue_block(table: Table, row_start: int, issue: Issue) -> None:
+def _fill_entry_block(table: Table, row_start: int, entry: Issue) -> None:
     description_cell = table.cell(row_start, 0)
     image_cell = table.cell(row_start, 1)
 
-    _set_cell_text(description_cell, issue.description)
-    _set_issue_images(image_cell, issue.images_description, issue.image_paths)
+    _set_cell_text(description_cell, entry.description)
+    _set_issue_images(image_cell, entry.images_description, entry.image_paths)
 
 
 def _set_cell_text(cell: _Cell, text: str) -> None:

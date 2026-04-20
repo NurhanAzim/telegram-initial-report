@@ -175,6 +175,7 @@ class DraftStore:
             "stage": "field",
             "edit_field_key": None,
             "edit_issue_index": None,
+            "delete_issue_index": None,
             "review_message_id": None,
             "workspace": "",
         }

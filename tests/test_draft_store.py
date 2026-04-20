@@ -18,6 +18,8 @@ class DraftStoreTest(unittest.TestCase):
             session = store.create_report(chat_id=123)
             session.data["date"] = "16/04/2026"
             session.data["project_name"] = "Projek Demo"
+            session.data["report_action"] = "Tindakan susulan dibuat."
+            session.data["report_conclusion"] = "Kerja selesai."
             session.stage = "review"
             session.issues = [Issue(description="Kabel belum dirapikan", images_description="Foto susulan", image_paths=[])]
             store.save_session(session)
@@ -30,6 +32,8 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(loaded.stage, "review")
             self.assertEqual(loaded.issues[0].description, "Kabel belum dirapikan")
             self.assertEqual(loaded.issues[0].images_description, "Foto susulan")
+            self.assertEqual(loaded.data["report_action"], "Tindakan susulan dibuat.")
+            self.assertEqual(loaded.data["report_conclusion"], "Kerja selesai.")
             self.assertEqual(store.list_report_assets(session.draft_id or 0), [])
 
     def test_list_reports_and_revision_retention(self) -> None:
@@ -88,7 +92,7 @@ class DraftStoreTest(unittest.TestCase):
 
             assets = store.list_report_assets(session.draft_id or 0)
             self.assertEqual(len(assets), 2)
-            self.assertEqual(assets[0].local_path, str(image1))
+            self.assertEqual({asset.local_path for asset in assets}, {str(image1), str(image2)})
 
             store.archive_report(chat_id=123, report_id=session.draft_id or 0)
             store.cleanup_report_assets(session.draft_id or 0, str(session.workspace))

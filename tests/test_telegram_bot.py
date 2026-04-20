@@ -82,6 +82,8 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "project_sub_name": "Fasa 1",
                     "report_title": "Bilik Server",
                     "report_purpose": "Pemeriksaan awal",
+                    "report_action": "Pemeriksaan semula dan pembetulan asas dibuat.",
+                    "report_conclusion": "Semua tindakan selesai.",
                     "report_author": "MUHAMMAD ADAM BIN JAFFRY",
                     "report_author_role": "DEVOPS ENGINEER",
                 }
@@ -90,13 +92,14 @@ class TelegramBotReviewTest(unittest.TestCase):
                 Issue(description="Kabel belum dirapikan", images_description="Foto server rack", image_paths=[Path("a.jpg"), Path("b.jpg")]),
                 Issue(description="Label rack belum lengkap", image_paths=[]),
             ]
-
             text = _review_text(session)
 
             self.assertIn("Semakan laporan R-7:", text)
             self.assertIn("1. Tarikh laporan: 16/04/2026", text)
             self.assertIn("1. Kabel belum dirapikan | Lampiran: Foto server rack (2 gambar)", text)
             self.assertIn("2. Label rack belum lengkap (0 gambar)", text)
+            self.assertIn("Tindakan: Pemeriksaan semula dan pembetulan asas dibuat.", text)
+            self.assertIn("Kesimpulan laporan: Semua tindakan selesai.", text)
             self.assertIn("6. Penyedia laporan: MUHAMMAD ADAM BIN JAFFRY", text)
             self.assertIn("Gunakan butang di bawah", text)
 
@@ -132,6 +135,8 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(first_row["text"], "1. Tarikh laporan")
         self.assertEqual(first_row["callback_data"], "review:field:date")
         self.assertEqual(keyboard["inline_keyboard"][5][0]["text"], "6. Penyedia laporan")
+        self.assertEqual(keyboard["inline_keyboard"][6][0]["text"], "7. Tindakan")
+        self.assertEqual(keyboard["inline_keyboard"][7][0]["text"], "8. Kesimpulan laporan")
 
     def test_author_reply_keyboard_uses_name_only(self) -> None:
         keyboard = _author_reply_keyboard(back_to_review=True)
@@ -287,6 +292,8 @@ class TelegramBotReviewTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Bilik Server",
                 report_purpose="Pemeriksaan awal",
+                report_action="Pemeriksaan semula dibuat.",
+                report_conclusion="Selesai.",
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
                 issues=[],
@@ -448,7 +455,6 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertEqual(session.stage, "review")
             self.assertIsNone(session.delete_issue_index)
             self.assertIn('Isu 1 dibuang: "Kabel belum dirapikan"', client.messages[-1][1])
-
 
 if __name__ == "__main__":
     unittest.main()

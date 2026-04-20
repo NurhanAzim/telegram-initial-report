@@ -111,16 +111,16 @@ def _handle_issue_description(
     hooks: ConversationHooks,
 ) -> None:
     if text == "/done":
-        _enter_review(client, store, session, hooks)
+        _enter_report_action_flow(client, store, session, hooks)
         return
     if not text:
         client.send_message(session.chat_id, "Keterangan isu tidak boleh kosong.")
         return
     if len(session.issues) >= max_issues_per_report:
-        _enter_review(client, store, session, hooks)
+        _enter_report_action_flow(client, store, session, hooks)
         client.send_message(
             session.chat_id,
-            f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
+            f"Had isu per laporan telah dicapai ({max_issues_per_report}). Teruskan dengan bahagian tindakan.",
         )
         return
 
@@ -267,10 +267,10 @@ def _handle_more_issues(
     normalized = text.lower()
     if normalized in {YES_LABEL.lower(), "y", "yes"}:
         if len(session.issues) >= max_issues_per_report:
-            _enter_review(client, store, session, hooks)
+            _enter_report_action_flow(client, store, session, hooks)
             client.send_message(
                 session.chat_id,
-                f"Had isu per laporan telah dicapai ({max_issues_per_report}). Sila semak laporan semasa.",
+                f"Had isu per laporan telah dicapai ({max_issues_per_report}). Teruskan dengan bahagian tindakan.",
             )
             return
         session.stage = "issue_description"
@@ -282,7 +282,7 @@ def _handle_more_issues(
         )
         return
     if normalized in {NO_LABEL.lower(), "tak", "t", "no", "n"}:
-        _enter_review(client, store, session, hooks)
+        _enter_report_action_flow(client, store, session, hooks)
         return
 
     client.send_message(
@@ -348,6 +348,28 @@ def _handle_edit_issue_description(
     hooks.show_review(client, store, session, prefix=f"Keterangan isu {issue_number} telah dikemas kini.\n\n")
 
 
+def _handle_report_action(client: Any, store: DraftStore, session: Session, text: str, hooks: ConversationHooks) -> None:
+    if not text:
+        client.send_message(session.chat_id, "Tindakan laporan tidak boleh kosong.")
+        return
+
+    _ensure_persisted_session(store, session)
+    session.data["report_action"] = text
+    store.save_session(session)
+    _enter_report_conclusion_flow(client, store, session, hooks)
+
+
+def _handle_report_conclusion(client: Any, store: DraftStore, session: Session, text: str, hooks: ConversationHooks) -> None:
+    if not text:
+        client.send_message(session.chat_id, "Kesimpulan laporan tidak boleh kosong.")
+        return
+
+    _ensure_persisted_session(store, session)
+    session.data["report_conclusion"] = text
+    store.save_session(session)
+    _enter_review(client, store, session, hooks)
+
+
 def _resume_draft(
     client: Any,
     store: DraftStore,
@@ -358,6 +380,7 @@ def _resume_draft(
     session.stage = "review"
     session.edit_field_key = None
     session.edit_issue_index = None
+    session.delete_issue_index = None
     store.save_session(session)
     hooks.show_review(client, store, session, prefix=prefix)
 
@@ -366,9 +389,30 @@ def _enter_review(client: Any, store: DraftStore, session: Session, hooks: Conve
     session.stage = "review"
     session.edit_field_key = None
     session.edit_issue_index = None
+    session.delete_issue_index = None
     store.save_session(session)
     hooks.dismiss_reply_keyboard(client, session.chat_id)
     hooks.show_review(client, store, session)
+
+
+def _enter_report_action_flow(client: Any, store: DraftStore, session: Session, hooks: ConversationHooks) -> None:
+    if session.data.get("report_action"):
+        _enter_report_conclusion_flow(client, store, session, hooks)
+        return
+    session.stage = "report_action"
+    store.save_session(session)
+    hooks.dismiss_reply_keyboard(client, session.chat_id)
+    client.send_message(session.chat_id, "Masukkan tindakan yang diambil.")
+
+
+def _enter_report_conclusion_flow(client: Any, store: DraftStore, session: Session, hooks: ConversationHooks) -> None:
+    if session.data.get("report_conclusion"):
+        _enter_review(client, store, session, hooks)
+        return
+    session.stage = "report_conclusion"
+    store.save_session(session)
+    hooks.dismiss_reply_keyboard(client, session.chat_id)
+    client.send_message(session.chat_id, "Masukkan kesimpulan laporan.")
 
 
 def _ensure_persisted_session(store: DraftStore, session: Session) -> None:

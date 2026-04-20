@@ -14,8 +14,12 @@ FIELDS: list[tuple[str, str, str]] = [
     ("report_purpose", "Tujuan laporan", "Contoh: Pemeriksaan awal tapak"),
     ("report_author", "Penyedia laporan", "Pilih nama daripada butang yang disediakan"),
 ]
-FIELD_LABELS = {key: label for key, label, _ in FIELDS}
-FIELD_GUIDANCE = {key: guidance for key, _, guidance in FIELDS}
+EDITABLE_FIELDS: list[tuple[str, str, str]] = FIELDS + [
+    ("report_action", "Tindakan", "Contoh: Pemeriksaan semula dilakukan dan pembetulan asas dibuat."),
+    ("report_conclusion", "Kesimpulan laporan", "Contoh: Tindakan susulan diteruskan mengikut jadual."),
+]
+FIELD_LABELS = {key: label for key, label, _ in EDITABLE_FIELDS}
+FIELD_GUIDANCE = {key: guidance for key, _, guidance in EDITABLE_FIELDS}
 AUTHOR_OPTIONS: list[tuple[str, str]] = [
     ("MUHAMMAD ADAM BIN JAFFRY", "DEVOPS ENGINEER"),
     ("DZAHIRUDDIN BIN DZULKIFLEE", "ASSOCIATE ENGINEER"),
@@ -92,7 +96,9 @@ def _review_text(session: Session) -> str:
         ]
     else:
         issue_lines = ["Tiada isu."]
-    return "\n".join(header_lines + issue_lines + ["", "Gunakan butang di bawah untuk semak, ubah, atau jana laporan."])
+    report_action_lines = ["", f"Tindakan: {session.data.get('report_action', '-')}"]
+    conclusion_lines = ["", f"Kesimpulan laporan: {session.data.get('report_conclusion', '-')}"]
+    return "\n".join(header_lines + issue_lines + report_action_lines + conclusion_lines + ["", "Gunakan butang di bawah untuk semak, ubah, atau jana laporan."])
 
 
 def _review_keyboard(session: Session) -> dict:
@@ -136,7 +142,7 @@ def _review_keyboard(session: Session) -> dict:
 def _field_selection_keyboard() -> dict:
     rows = [
         [_button(f"{index}. {label}", f"{REVIEW_CALLBACK_PREFIX}:field:{key}")]
-        for index, (key, label, _) in enumerate(FIELDS, start=1)
+        for index, (key, label, _) in enumerate(EDITABLE_FIELDS, start=1)
     ]
     rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:back")])
     return {"inline_keyboard": rows}
@@ -350,6 +356,10 @@ def _help_text(
         "Nota isu:\n"
         "- Selepas keterangan isu, bot akan minta keterangan lampiran\n"
         "- Balas /skip jika tiada keterangan lampiran tambahan\n\n"
+        "Nota tindakan:\n"
+        "- Selepas semua isu selesai, bot akan minta tindakan yang diambil\n"
+        "- Tindakan ialah satu teks ringkas pada peringkat laporan\n"
+        "- Selepas itu, bot akan minta kesimpulan laporan\n\n"
         "Had lalai:\n"
         f"- Max gambar per isu: {max_images_per_issue_default}\n"
         f"- Max isu per laporan: {max_issues_per_report_default}\n"

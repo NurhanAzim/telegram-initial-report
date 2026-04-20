@@ -28,6 +28,8 @@ from telegram_flow import (
     _handle_issue_images,
     _handle_issue_images_description,
     _handle_more_issues,
+    _handle_report_action,
+    _handle_report_conclusion,
     _resume_draft,
 )
 from telegram_ui import (
@@ -344,6 +346,14 @@ def _handle_update(
         _handle_more_issues(client, store, session, text, max_issues_per_report, CONVERSATION_HOOKS)
         return
 
+    if session.stage == "report_action":
+        _handle_report_action(client, store, session, text, CONVERSATION_HOOKS)
+        return
+
+    if session.stage == "report_conclusion":
+        _handle_report_conclusion(client, store, session, text, CONVERSATION_HOOKS)
+        return
+
     if session.stage == "review":
         client.send_message(chat_id, "Semakan menggunakan butang. Gunakan panel semakan yang dihantar bot.")
         return
@@ -636,6 +646,8 @@ def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store:
         project_sub_name=session.data["project_sub_name"],
         report_title=session.data["report_title"],
         report_purpose=session.data["report_purpose"],
+        report_action=session.data.get("report_action", ""),
+        report_conclusion=session.data.get("report_conclusion", ""),
         report_author=session.data["report_author"],
         report_author_role=session.data["report_author_role"],
         issues=session.issues,
@@ -849,6 +861,8 @@ def _report_payload_json(report: ReportData) -> str:
         "project_sub_name": report.project_sub_name,
         "report_title": report.report_title,
         "report_purpose": report.report_purpose,
+        "report_action": report.report_action,
+        "report_conclusion": report.report_conclusion,
         "report_author": report.report_author,
         "report_author_role": report.report_author_role,
         "issues": [

@@ -72,19 +72,21 @@ python3 telegram_bot.py
 4. Optionally send attachment description text for that issue, or send `/skip`
 5. Send one or more images for that issue
 6. Send `/done`
-7. Use the keyboard buttons `Ya` or `Tidak` to continue or open review
-8. In review, use the inline buttons in the chat:
+7. Use the keyboard buttons `Ya` or `Tidak` to continue with more issues
+8. After issues, send the report action text
+9. Send the report conclusion
+10. In review, use the inline buttons in the chat:
    `Jana Laporan`
    `Lihat PDF`
    `Arkib`
    `Padam Laporan`
    `Tambah Isu`
-   `Edit Butiran` then pick `1-6`
+   `Edit Butiran` then pick `1-8`
    `Edit Isu` then pick issue number `1..n`
    `Padam Isu` then pick issue number `1..n`
-9. After generation, the bot opens the PDF revision view directly
-10. Reopen an active report later with `/reports` or the `Buka R-<id>` button
-11. View archived reports later with `/archived`
+11. After generation, the bot opens the PDF revision view directly
+12. Reopen an active report later with `/reports` or the `Buka R-<id>` button
+13. View archived reports later with `/archived`
 
 If there is no issue at all, send `/done` when the bot asks for the first issue description.
 

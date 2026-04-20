@@ -37,6 +37,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
+                report_action="Tindakan pembetulan segera telah dibuat.",
+                report_conclusion="Semua tindakan telah direkodkan.",
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
                 issues=[Issue(description="Kabel belum dirapikan", images_description="Lampiran utama", image_paths=[image_path])],
@@ -52,6 +54,8 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertIn("Sub-Projek: Fasa 1", full_text)
             self.assertIn("Tajuk: Laporan Server Room", full_text)
             self.assertIn("Tujuan: Pemeriksaan awal", full_text)
+            self.assertIn("Tindakan pembetulan segera telah dibuat.", full_text)
+            self.assertIn("Semua tindakan telah direkodkan.", full_text)
             self.assertIn("Nama: \tMUHAMMAD ADAM BIN JAFFRY", full_text)
             self.assertIn("Jawatan: DEVOPS ENGINEER", full_text)
             self.assertIn("Kabel belum dirapikan", table_text)
@@ -59,6 +63,7 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertNotIn("<date>", full_text)
             self.assertNotIn("<issue_description>", table_text)
             self.assertNotIn("<issue_images>", table_text)
+            self.assertNotIn("<report_action>", full_text)
             self.assertGreater(rendered_doc.inline_shapes.__len__(), template_doc.inline_shapes.__len__())
             new_shape = rendered_doc.inline_shapes[-1]
             self.assertLessEqual(int(new_shape.height), int(Cm(7)))
@@ -75,6 +80,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
+                report_action="Tindakan awal dibuat.",
+                report_conclusion="Selesai.",
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
                 issues=[
@@ -109,6 +116,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
+                report_action="Tindakan awal dibuat.",
+                report_conclusion="Selesai.",
                 report_author="MUHAMMAD ADAM BIN JAFFRY",
                 report_author_role="DEVOPS ENGINEER",
                 issues=[
@@ -146,6 +155,8 @@ class ReportGeneratorTest(unittest.TestCase):
                 project_sub_name="Fasa 1",
                 report_title="Server Room",
                 report_purpose="Pemeriksaan awal",
+                report_action="Tindakan awal dibuat.",
+                report_conclusion="Selesai.",
                 report_author="KHAIRUL ANUAR JOHARI",
                 report_author_role="TECHNICAL DIRECTOR",
                 issues=[],
