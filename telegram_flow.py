@@ -348,6 +348,99 @@ def _handle_edit_issue_description(
     hooks.show_review(client, store, session, prefix=f"Keterangan isu {issue_number} telah dikemas kini.\n\n")
 
 
+def _handle_edit_issue_images_description(
+    client: Any,
+    store: DraftStore,
+    session: Session,
+    text: str,
+    hooks: ConversationHooks,
+) -> None:
+    issue_index = session.edit_issue_index
+    if issue_index is None or issue_index >= len(session.issues):
+        session.edit_issue_index = None
+        session.stage = "review"
+        store.save_session(session)
+        hooks.show_review(client, store, session)
+        return
+
+    normalized = text.strip()
+    if normalized.lower() == "/skip":
+        normalized = ""
+    elif not normalized:
+        client.send_message(session.chat_id, "Keterangan lampiran isu tidak boleh kosong. Balas /skip untuk kosongkan.")
+        return
+
+    issue_number = issue_index + 1
+    session.issues[issue_index].images_description = normalized
+    session.edit_issue_index = None
+    session.stage = "review"
+    store.save_session(session)
+    hooks.show_review(client, store, session, prefix=f"Keterangan lampiran isu {issue_number} telah dikemas kini.\n\n")
+
+
+def _handle_edit_issue_add_images(
+    client: Any,
+    store: DraftStore,
+    session: Session,
+    message: dict,
+    text: str,
+    max_images_per_issue: int,
+    max_total_images_per_report: int,
+    max_image_file_size_bytes: int,
+    hooks: ConversationHooks,
+) -> None:
+    issue_index = session.edit_issue_index
+    if issue_index is None or issue_index >= len(session.issues):
+        session.edit_issue_index = None
+        session.stage = "review"
+        store.save_session(session)
+        hooks.show_review(client, store, session)
+        return
+
+    if text == "/done":
+        issue_number = issue_index + 1
+        session.edit_issue_index = None
+        session.stage = "review"
+        store.save_session(session)
+        hooks.show_review(client, store, session, prefix=f"Kemaskini gambar isu {issue_number} selesai.\n\n")
+        return
+
+    image_file_id, suffix, file_size = _extract_image_file(message)
+    if not image_file_id:
+        client.send_message(session.chat_id, "Hantar gambar sebagai photo atau dokumen imej, atau balas /done.")
+        return
+
+    issue = session.issues[issue_index]
+    if len(issue.image_paths) >= max_images_per_issue:
+        client.send_message(
+            session.chat_id,
+            f"Had gambar bagi satu isu telah dicapai ({max_images_per_issue}). Balas /done untuk kembali.",
+        )
+        return
+    if _count_total_images(session) >= max_total_images_per_report:
+        client.send_message(
+            session.chat_id,
+            f"Had jumlah gambar bagi satu laporan telah dicapai ({max_total_images_per_report}). Balas /done untuk kembali.",
+        )
+        return
+    if file_size is not None and file_size > max_image_file_size_bytes:
+        limit_mb = max_image_file_size_bytes / (1024 * 1024)
+        client.send_message(
+            session.chat_id,
+            f"Saiz fail gambar melebihi had {limit_mb:.0f} MB. Sila hantar fail lebih kecil.",
+        )
+        return
+
+    _ensure_persisted_session(store, session)
+    issue_number = issue_index + 1
+    image_number = _next_issue_image_number(issue_number, issue.image_paths)
+    file_path = session.workspace / f"issue-{issue_number}-{image_number}{suffix}"
+    client.download_file(image_file_id, file_path)
+    issue.image_paths.append(file_path)
+    store.save_session(session)
+    client.send_message(session.chat_id, f"Gambar diterima: {file_path.name}")
+
+
 def _handle_report_action(client: Any, store: DraftStore, session: Session, text: str, hooks: ConversationHooks) -> None:
     if not text:
         client.send_message(session.chat_id, "Tindakan laporan tidak boleh kosong.")
@@ -447,6 +540,16 @@ def _extract_image_file(message: dict) -> tuple[str | None, str, int | None]:
 
 def _count_total_images(session: Session) -> int:
     return sum(len(issue.image_paths) for issue in session.issues) + len(session.current_issue.image_paths)
+
+
+def _next_issue_image_number(issue_number: int, image_paths: list[Path]) -> int:
+    max_number = 0
+    pattern = re.compile(rf"issue-{issue_number}-(\d+)$")
+    for path in image_paths:
+        match = pattern.fullmatch(path.stem)
+        if match:
+            max_number = max(max_number, int(match.group(1)))
+    return max_number + 1 if max_number else len(image_paths) + 1
 
 
 def _is_valid_date(value: str) -> bool:

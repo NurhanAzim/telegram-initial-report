@@ -23,6 +23,8 @@ from telegram_flow import (
     _handle_edit_command,
     _handle_edit_field,
     _handle_edit_issue_description,
+    _handle_edit_issue_images_description,
+    _handle_edit_issue_add_images,
     _handle_field_input,
     _handle_issue_description,
     _handle_issue_images,
@@ -58,6 +60,8 @@ from telegram_ui import (
     _field_selection_keyboard,
     _format_timestamp,
     _help_text,
+    _issue_edit_options_keyboard,
+    _issue_image_selection_keyboard,
     _issue_selection_keyboard,
     _match_author_option,
     _parse_callback_data,
@@ -370,6 +374,24 @@ def _handle_update(
         _handle_edit_issue_description(client, store, session, text, CONVERSATION_HOOKS)
         return
 
+    if session.stage == "edit_issue_images_description":
+        _handle_edit_issue_images_description(client, store, session, text, CONVERSATION_HOOKS)
+        return
+
+    if session.stage == "edit_issue_add_images":
+        _handle_edit_issue_add_images(
+            client,
+            store,
+            session,
+            message,
+            text,
+            max_images_per_issue,
+            max_total_images_per_report,
+            max_image_file_size_bytes,
+            CONVERSATION_HOOKS,
+        )
+        return
+
     client.send_message(chat_id, "Keadaan sesi tidak dikenali. Hantar /cancel dan mula semula.")
 
 def _handle_callback_query(
@@ -584,6 +606,15 @@ def _handle_callback_query(
         if value >= len(session.issues):
             _show_review(client, store, session, prefix=f"Isu {value + 1} tidak wujud.\n\n")
             return
+        _show_issue_edit_menu(client, store, session, value)
+        return
+
+    if action == "edit_issue_description" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        if value >= len(session.issues):
+            _show_review(client, store, session, prefix=f"Isu {value + 1} tidak wujud.\n\n")
+            return
+        issue = session.issues[value]
         session.edit_issue_index = value
         session.stage = "edit_issue_description"
         store.save_session(session)
@@ -591,9 +622,50 @@ def _handle_callback_query(
             client,
             store,
             session,
-            f"Masukkan keterangan baharu untuk isu {value + 1}.",
+            f"Masukkan keterangan baharu untuk isu {value + 1}.\nSemasa: {issue.description}",
             _back_to_review_keyboard(),
         )
+        return
+
+    if action == "edit_issue_images_description" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        if value >= len(session.issues):
+            _show_review(client, store, session, prefix=f"Isu {value + 1} tidak wujud.\n\n")
+            return
+        issue = session.issues[value]
+        current_value = issue.images_description or "(kosong)"
+        session.edit_issue_index = value
+        session.stage = "edit_issue_images_description"
+        store.save_session(session)
+        _set_review_message(
+            client,
+            store,
+            session,
+            f"Masukkan keterangan lampiran baharu untuk isu {value + 1}. Balas /skip untuk kosongkan.\nSemasa: {current_value}",
+            _back_to_review_keyboard(),
+        )
+        return
+
+    if action == "edit_issue_add_image" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        if value >= len(session.issues):
+            _show_review(client, store, session, prefix=f"Isu {value + 1} tidak wujud.\n\n")
+            return
+        session.edit_issue_index = value
+        session.stage = "edit_issue_add_images"
+        store.save_session(session)
+        _set_review_message(
+            client,
+            store,
+            session,
+            f"Hantar gambar baharu untuk isu {value + 1}. Balas /done apabila selesai.",
+            _back_to_review_keyboard(),
+        )
+        return
+
+    if action == "menu_remove_issue_image" and isinstance(value, int):
+        client.answer_callback_query(callback_id)
+        _show_issue_image_selection_menu(client, store, session, value)
         return
 
     if action == "select_delete_issue" and isinstance(value, int):
@@ -634,6 +706,41 @@ def _handle_callback_query(
         session.delete_issue_index = None
         store.save_session(session)
         _show_issue_selection_menu(client, store, session, "delete", prefix="Padam isu dibatalkan.\n\n")
+        return
+
+    if action == "remove_issue_image" and isinstance(value, tuple) and len(value) == 2:
+        client.answer_callback_query(callback_id)
+        issue_index, image_index = value
+        if issue_index >= len(session.issues):
+            _show_review(client, store, session, prefix=f"Isu {issue_index + 1} tidak wujud.\n\n")
+            return
+        issue = session.issues[issue_index]
+        if image_index >= len(issue.image_paths):
+            _show_issue_image_selection_menu(client, store, session, issue_index, prefix="Gambar itu tidak lagi wujud.\n\n")
+            return
+        removed_path = issue.image_paths.pop(image_index)
+        try:
+            if removed_path.exists():
+                removed_path.unlink()
+        except Exception:
+            LOGGER.debug("Failed to delete removed issue image %s", removed_path, exc_info=True)
+        store.save_session(session)
+        if issue.image_paths:
+            _show_issue_image_selection_menu(
+                client,
+                store,
+                session,
+                issue_index,
+                prefix=f"Gambar {removed_path.name} telah dipadam.\n\n",
+            )
+        else:
+            _show_issue_edit_menu(
+                client,
+                store,
+                session,
+                issue_index,
+                prefix=f"Gambar {removed_path.name} telah dipadam. Tiada gambar lagi untuk isu ini.\n\n",
+            )
         return
 
     client.answer_callback_query(callback_id)
@@ -785,6 +892,48 @@ def _show_issue_selection_menu(
         return
     title = "Pilih isu yang mahu diubah:" if mode == "edit" else "Pilih isu yang mahu dibuang:"
     _set_review_message(client, store, session, f"{prefix}{title}", _issue_selection_keyboard(session, mode))
+
+
+def _show_issue_edit_menu(
+    client: TelegramBotClient,
+    store: DraftStore,
+    session: Session,
+    issue_index: int,
+    prefix: str = "",
+) -> None:
+    if issue_index >= len(session.issues):
+        _show_review(client, store, session, prefix=f"Isu {issue_index + 1} tidak wujud.\n\n")
+        return
+    _set_review_message(
+        client,
+        store,
+        session,
+        f"{prefix}Pilih bahagian yang mahu diubah untuk isu {issue_index + 1}:",
+        _issue_edit_options_keyboard(issue_index),
+    )
+
+
+def _show_issue_image_selection_menu(
+    client: TelegramBotClient,
+    store: DraftStore,
+    session: Session,
+    issue_index: int,
+    prefix: str = "",
+) -> None:
+    if issue_index >= len(session.issues):
+        _show_review(client, store, session, prefix=f"Isu {issue_index + 1} tidak wujud.\n\n")
+        return
+    issue = session.issues[issue_index]
+    if not issue.image_paths:
+        _show_issue_edit_menu(client, store, session, issue_index, prefix=f"{prefix}Tiada gambar untuk dipadam.\n\n")
+        return
+    _set_review_message(
+        client,
+        store,
+        session,
+        f"{prefix}Pilih gambar yang mahu dipadam daripada isu {issue_index + 1}:",
+        _issue_image_selection_keyboard(issue_index, [str(path) for path in issue.image_paths]),
+    )
 
 
 def _dismiss_reply_keyboard(client: TelegramBotClient, chat_id: int) -> None:

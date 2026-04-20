@@ -63,9 +63,14 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(_parse_callback_data("review:menu_fields"), ("menu_fields", None))
         self.assertEqual(_parse_callback_data("review:field:date"), ("select_field", "date"))
         self.assertEqual(_parse_callback_data("review:edit_issue:1"), ("select_edit_issue", 1))
+        self.assertEqual(_parse_callback_data("review:edit_issue_description:1"), ("edit_issue_description", 1))
+        self.assertEqual(_parse_callback_data("review:edit_issue_images_description:1"), ("edit_issue_images_description", 1))
+        self.assertEqual(_parse_callback_data("review:edit_issue_add_image:1"), ("edit_issue_add_image", 1))
         self.assertEqual(_parse_callback_data("review:delete_issue:2"), ("select_delete_issue", 2))
         self.assertEqual(_parse_callback_data("review:confirm_delete_issue:2"), ("confirm_delete_issue", 2))
         self.assertEqual(_parse_callback_data("review:cancel_delete_issue"), ("cancel_delete_issue", None))
+        self.assertEqual(_parse_callback_data("review:menu_remove_issue_image:1"), ("menu_remove_issue_image", 1))
+        self.assertEqual(_parse_callback_data("review:remove_issue_image:1:0"), ("remove_issue_image", (1, 0)))
         self.assertEqual(_parse_callback_data("draft:edit:9"), ("draft_edit", 9))
         self.assertEqual(_parse_callback_data("draft:list"), ("draft_list", None))
         self.assertEqual(_parse_callback_data("archived:edit:9"), ("archived_edit", 9))
@@ -455,6 +460,155 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertEqual(session.stage, "review")
             self.assertIsNone(session.delete_issue_index)
             self.assertIn('Isu 1 dibuang: "Kabel belum dirapikan"', client.messages[-1][1])
+
+    def test_edit_issue_description_prompt_includes_current_value(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.messages: list[tuple[int, str, dict | None]] = []
+                self.callback_answers: list[tuple[str, str | None]] = []
+
+            def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": len(self.messages)}
+
+            def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": message_id}
+
+            def delete_message(self, chat_id: int, message_id: int) -> dict:
+                return {}
+
+            def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+                self.callback_answers.append((callback_query_id, text))
+                return {}
+
+        class FakeNextcloud:
+            pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.review_message_id = 88
+            session.issues = [Issue(description="Kabel belum dirapikan", image_paths=[])]
+            store.save_session(session)
+            sessions = {1: session}
+            client = FakeClient()
+
+            _handle_callback_query(
+                client,
+                FakeNextcloud(),
+                store,
+                {
+                    "id": "cb-1",
+                    "data": "review:edit_issue_description:0",
+                    "message": {"message_id": 88, "chat": {"id": 1}},
+                },
+                sessions,
+            )
+
+            self.assertIn("Semasa: Kabel belum dirapikan", client.messages[-1][1])
+
+    def test_edit_issue_image_description_prompt_includes_current_value(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.messages: list[tuple[int, str, dict | None]] = []
+                self.callback_answers: list[tuple[str, str | None]] = []
+
+            def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": len(self.messages)}
+
+            def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": message_id}
+
+            def delete_message(self, chat_id: int, message_id: int) -> dict:
+                return {}
+
+            def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+                self.callback_answers.append((callback_query_id, text))
+                return {}
+
+        class FakeNextcloud:
+            pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.review_message_id = 89
+            session.issues = [Issue(description="Kabel belum dirapikan", images_description="Foto asal", image_paths=[])]
+            store.save_session(session)
+            sessions = {1: session}
+            client = FakeClient()
+
+            _handle_callback_query(
+                client,
+                FakeNextcloud(),
+                store,
+                {
+                    "id": "cb-1",
+                    "data": "review:edit_issue_images_description:0",
+                    "message": {"message_id": 89, "chat": {"id": 1}},
+                },
+                sessions,
+            )
+
+            self.assertIn("Semasa: Foto asal", client.messages[-1][1])
+
+    def test_remove_issue_image_deletes_file_and_updates_issue(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.messages: list[tuple[int, str, dict | None]] = []
+                self.callback_answers: list[tuple[str, str | None]] = []
+
+            def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": len(self.messages)}
+
+            def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": message_id}
+
+            def delete_message(self, chat_id: int, message_id: int) -> dict:
+                return {}
+
+            def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+                self.callback_answers.append((callback_query_id, text))
+                return {}
+
+        class FakeNextcloud:
+            pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.review_message_id = 77
+            image_path = session.workspace / "issue-1-1.jpg"
+            image_path.parent.mkdir(parents=True, exist_ok=True)
+            image_path.write_text("x", encoding="utf-8")
+            session.issues = [Issue(description="Kabel belum dirapikan", image_paths=[image_path])]
+            store.save_session(session)
+            sessions = {1: session}
+            client = FakeClient()
+
+            _handle_callback_query(
+                client,
+                FakeNextcloud(),
+                store,
+                {
+                    "id": "cb-1",
+                    "data": "review:remove_issue_image:0:0",
+                    "message": {"message_id": 77, "chat": {"id": 1}},
+                },
+                sessions,
+            )
+
+            self.assertEqual(session.issues[0].image_paths, [])
+            self.assertFalse(image_path.exists())
+            self.assertIn("Tiada gambar lagi untuk isu ini.", client.messages[-1][1])
 
 if __name__ == "__main__":
     unittest.main()

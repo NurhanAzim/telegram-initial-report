@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from bot_state import Session
 from draft_store import DraftSummary, GeneratedFileRecord
@@ -178,6 +179,27 @@ def _issue_selection_keyboard(session: Session, mode: str) -> dict:
     return {"inline_keyboard": rows}
 
 
+def _issue_edit_options_keyboard(issue_index: int) -> dict:
+    return {
+        "inline_keyboard": [
+            [_button("Keterangan Isu", f"{REVIEW_CALLBACK_PREFIX}:edit_issue_description:{issue_index}")],
+            [_button("Keterangan Lampiran", f"{REVIEW_CALLBACK_PREFIX}:edit_issue_images_description:{issue_index}")],
+            [_button("Tambah Gambar", f"{REVIEW_CALLBACK_PREFIX}:edit_issue_add_image:{issue_index}")],
+            [_button("Padam Gambar", f"{REVIEW_CALLBACK_PREFIX}:menu_remove_issue_image:{issue_index}")],
+            [_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:menu_edit_issues")],
+        ]
+    }
+
+
+def _issue_image_selection_keyboard(issue_index: int, image_paths: list[str]) -> dict:
+    rows = [
+        [_button(f"{position}. {Path(path).name}", f"{REVIEW_CALLBACK_PREFIX}:remove_issue_image:{issue_index}:{position - 1}")]
+        for position, path in enumerate(image_paths, start=1)
+    ]
+    rows.append([_button("Kembali", f"{REVIEW_CALLBACK_PREFIX}:edit_issue:{issue_index}")])
+    return {"inline_keyboard": rows}
+
+
 def _drafts_keyboard(drafts: list[DraftSummary]) -> dict:
     rows = [[_button(f"Buka R-{draft.draft_id}", f"{DRAFT_CALLBACK_PREFIX}:edit:{draft.draft_id}")] for draft in drafts]
     rows.append([_button("Muat Semula", f"{DRAFT_CALLBACK_PREFIX}:list")])
@@ -312,10 +334,20 @@ def _parse_callback_data(data: str) -> tuple[str, str | int | None]:
             return "select_field", parts[2]
         if action == "edit_issue" and len(parts) >= 3 and parts[2].isdigit():
             return "select_edit_issue", int(parts[2])
+        if action == "edit_issue_description" and len(parts) >= 3 and parts[2].isdigit():
+            return "edit_issue_description", int(parts[2])
+        if action == "edit_issue_images_description" and len(parts) >= 3 and parts[2].isdigit():
+            return "edit_issue_images_description", int(parts[2])
+        if action == "edit_issue_add_image" and len(parts) >= 3 and parts[2].isdigit():
+            return "edit_issue_add_image", int(parts[2])
         if action == "delete_issue" and len(parts) >= 3 and parts[2].isdigit():
             return "select_delete_issue", int(parts[2])
         if action == "confirm_delete_issue" and len(parts) >= 3 and parts[2].isdigit():
             return "confirm_delete_issue", int(parts[2])
+        if action == "menu_remove_issue_image" and len(parts) >= 3 and parts[2].isdigit():
+            return "menu_remove_issue_image", int(parts[2])
+        if action == "remove_issue_image" and len(parts) >= 4 and parts[2].isdigit() and parts[3].isdigit():
+            return "remove_issue_image", (int(parts[2]), int(parts[3]))
         return "unknown", None
 
     if prefix == DRAFT_CALLBACK_PREFIX:
