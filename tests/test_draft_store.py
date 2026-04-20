@@ -161,6 +161,33 @@ class DraftStoreTest(unittest.TestCase):
             self.assertEqual(len(archived), 1)
             self.assertEqual(archived[0].project_name, "Report A")
 
+    def test_list_archived_reports_hides_expired_archives_from_user_view(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            fresh = store.create_report(chat_id=123)
+            fresh.data["project_name"] = "Fresh Archive"
+            store.save_session(fresh)
+            store.archive_report(chat_id=123, report_id=fresh.draft_id or 0)
+
+            expired = store.create_report(chat_id=123)
+            expired.data["project_name"] = "Expired Archive"
+            store.save_session(expired)
+            store.archive_report(chat_id=123, report_id=expired.draft_id or 0)
+
+            with store._connection() as connection:
+                connection.execute(
+                    "UPDATE drafts SET archived_at = ?, updated_at = ? WHERE id = ?",
+                    ("2026-03-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", expired.draft_id),
+                )
+
+            visible = store.list_archived_reports(chat_id=123, visible_cutoff_iso="2026-03-21T00:00:00+00:00")
+            all_archived = store.list_archived_reports(chat_id=123)
+
+            self.assertEqual([item.project_name for item in visible], ["Fresh Archive"])
+            self.assertEqual({item.project_name for item in all_archived}, {"Fresh Archive", "Expired Archive"})
+
     def test_auto_archive_stale_reports_only_targets_generated_active_reports(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

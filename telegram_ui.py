@@ -370,6 +370,8 @@ def _help_text(
     max_issues_per_report_default: int,
     max_total_images_per_report_default: int,
     max_image_file_size_mb_default: int,
+    retention_days: int,
+    archived_report_retention_days: int,
 ) -> str:
     return (
         "Arahan bot:\n"
@@ -396,6 +398,8 @@ def _help_text(
         f"- Max gambar per isu: {max_images_per_issue_default}\n"
         f"- Max isu per laporan: {max_issues_per_report_default}\n"
         f"- Max jumlah gambar per laporan: {max_total_images_per_report_default}\n"
-        f"- Max saiz gambar: {max_image_file_size_mb_default} MB\n\n"
+        f"- Max saiz gambar: {max_image_file_size_mb_default} MB\n"
+        f"- Revision PDF disimpan sekitar {retention_days} hari sebelum luput\n"
+        f"- Laporan arkib kekal boleh dipulihkan sekitar {archived_report_retention_days} hari\n\n"
         "Semakan akhir menggunakan butang, bukan arahan teks. Setiap jana PDF akan mencipta revision baharu, dan laporan arkib boleh dilihat semula melalui /archived."
     )

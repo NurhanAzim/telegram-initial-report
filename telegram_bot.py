@@ -243,10 +243,12 @@ def main() -> None:
                     store,
                     update,
                     sessions,
+                    retention_days,
                     max_images_per_issue,
                     max_issues_per_report,
                     max_total_images_per_report,
                     max_image_file_size_bytes,
+                    archived_report_retention_days,
                 )
         except KeyboardInterrupt:
             raise
@@ -261,14 +263,16 @@ def _handle_update(
     store: DraftStore,
     update: dict,
     sessions: dict[int, Session],
+    retention_days: int,
     max_images_per_issue: int,
     max_issues_per_report: int,
     max_total_images_per_report: int,
     max_image_file_size_bytes: int,
+    archived_report_retention_days: int,
 ) -> None:
     callback_query = update.get("callback_query")
     if callback_query:
-        _handle_callback_query(client, nextcloud, store, callback_query, sessions)
+        _handle_callback_query(client, nextcloud, store, callback_query, sessions, archived_report_retention_days)
         return
 
     message = update.get("message")
@@ -289,7 +293,7 @@ def _handle_update(
         return
 
     if text == "/archived":
-        _show_archived_reports(client, store, chat_id)
+        _show_archived_reports(client, store, chat_id, archived_report_retention_days)
         return
 
     if text.startswith("/edit"):
@@ -304,6 +308,8 @@ def _handle_update(
                 MAX_ISSUES_PER_REPORT_DEFAULT,
                 MAX_TOTAL_IMAGES_PER_REPORT_DEFAULT,
                 MAX_IMAGE_FILE_SIZE_MB_DEFAULT,
+                retention_days,
+                archived_report_retention_days,
             ),
         )
         return
@@ -400,6 +406,7 @@ def _handle_callback_query(
     store: DraftStore,
     callback_query: dict,
     sessions: dict[int, Session],
+    archived_report_retention_days: int,
 ) -> None:
     message = callback_query.get("message") or {}
     chat = message.get("chat") or {}
@@ -430,7 +437,12 @@ def _handle_callback_query(
         return
 
     if action == "archived_edit" and isinstance(value, int):
-        session = store.load_report_with_status(chat_id, value, statuses=("archived",))
+        session = store.load_report_with_status(
+            chat_id,
+            value,
+            statuses=("archived",),
+            archived_visible_cutoff_iso=_archived_visible_cutoff_iso(archived_report_retention_days),
+        )
         if session is None:
             client.answer_callback_query(callback_id, "Laporan arkib tidak dijumpai.")
             client.send_message(chat_id, "Laporan arkib itu tidak lagi wujud.")
@@ -448,7 +460,7 @@ def _handle_callback_query(
 
     if action == "archived_list":
         client.answer_callback_query(callback_id)
-        _show_archived_reports(client, store, chat_id)
+        _show_archived_reports(client, store, chat_id, archived_report_retention_days)
         return
 
     if not data.startswith(f"{REVIEW_CALLBACK_PREFIX}:"):
@@ -796,8 +808,16 @@ def _show_drafts(client: TelegramBotClient, store: DraftStore, chat_id: int) -> 
     client.send_message(chat_id, _drafts_text(drafts), reply_markup=_drafts_keyboard(drafts))
 
 
-def _show_archived_reports(client: TelegramBotClient, store: DraftStore, chat_id: int) -> None:
-    reports = store.list_archived_reports(chat_id)
+def _show_archived_reports(
+    client: TelegramBotClient,
+    store: DraftStore,
+    chat_id: int,
+    archived_report_retention_days: int,
+) -> None:
+    reports = store.list_archived_reports(
+        chat_id,
+        visible_cutoff_iso=_archived_visible_cutoff_iso(archived_report_retention_days),
+    )
     if not reports:
         client.send_message(chat_id, "Tiada laporan arkib.")
         return
@@ -957,6 +977,10 @@ def _delete_message_if_possible(client: TelegramBotClient, chat_id: int, message
         client.delete_message(chat_id, message_id)
     except Exception:
         LOGGER.debug("Failed to delete message %s in chat %s", message_id, chat_id, exc_info=True)
+
+
+def _archived_visible_cutoff_iso(archived_report_retention_days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=archived_report_retention_days)).isoformat()
 
 def _draft_display_number(store: DraftStore, chat_id: int, draft_id: int | None) -> int | None:
     if draft_id is None:

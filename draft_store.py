@@ -237,16 +237,27 @@ class DraftStore:
     def load_report(self, chat_id: int, report_id: int) -> Session | None:
         return self.load_report_with_status(chat_id, report_id, statuses=("active",))
 
-    def load_report_with_status(self, chat_id: int, report_id: int, statuses: tuple[str, ...]) -> Session | None:
+    def load_report_with_status(
+        self,
+        chat_id: int,
+        report_id: int,
+        statuses: tuple[str, ...],
+        archived_visible_cutoff_iso: str | None = None,
+    ) -> Session | None:
         placeholders = ", ".join("?" for _ in statuses)
+        conditions = [f"id = ? AND chat_id = ? AND status IN ({placeholders})"]
+        parameters: list[object] = [report_id, chat_id, *statuses]
+        if archived_visible_cutoff_iso is not None and statuses == ("archived",):
+            conditions.append("COALESCE(archived_at, updated_at) >= ?")
+            parameters.append(archived_visible_cutoff_iso)
         with self._connection() as connection:
             row = connection.execute(
                 f"""
                 SELECT id, chat_id, status, state_json
                 FROM drafts
-                WHERE id = ? AND chat_id = ? AND status IN ({placeholders})
+                WHERE {" AND ".join(conditions)}
                 """,
-                (report_id, chat_id, *statuses),
+                parameters,
             ).fetchone()
 
         if row is None:
@@ -260,20 +271,32 @@ class DraftStore:
     def list_reports(self, chat_id: int, limit: int = 10) -> list[DraftSummary]:
         return self._list_reports_by_status(chat_id, "active", limit)
 
-    def list_archived_reports(self, chat_id: int, limit: int = 10) -> list[DraftSummary]:
-        return self._list_reports_by_status(chat_id, "archived", limit)
+    def list_archived_reports(self, chat_id: int, limit: int = 10, visible_cutoff_iso: str | None = None) -> list[DraftSummary]:
+        return self._list_reports_by_status(chat_id, "archived", limit, visible_cutoff_iso)
 
-    def _list_reports_by_status(self, chat_id: int, status: str, limit: int) -> list[DraftSummary]:
+    def _list_reports_by_status(
+        self,
+        chat_id: int,
+        status: str,
+        limit: int,
+        visible_cutoff_iso: str | None = None,
+    ) -> list[DraftSummary]:
+        conditions = ["chat_id = ? AND status = ?"]
+        parameters: list[object] = [chat_id, status]
+        if status == "archived" and visible_cutoff_iso is not None:
+            conditions.append("COALESCE(archived_at, updated_at) >= ?")
+            parameters.append(visible_cutoff_iso)
+        parameters.append(limit)
         with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT id, chat_id, date, project_name, project_sub_name, updated_at, created_at, current_revision
                 FROM drafts
-                WHERE chat_id = ? AND status = ?
+                WHERE """ + " AND ".join(conditions) + """
                 ORDER BY updated_at DESC
                 LIMIT ?
                 """,
-                (chat_id, status, limit),
+                parameters,
             ).fetchall()
 
         return [

@@ -365,6 +365,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 44, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertIn(1, sessions)
@@ -382,6 +383,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 44, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertNotIn(1, sessions)
@@ -432,6 +434,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 55, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertEqual(len(session.issues), 1)
@@ -454,12 +457,70 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 55, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertEqual(len(session.issues), 0)
             self.assertEqual(session.stage, "review")
             self.assertIsNone(session.delete_issue_index)
             self.assertIn('Isu 1 dibuang: "Kabel belum dirapikan"', client.messages[-1][1])
+
+    def test_archived_edit_rejects_archive_past_retention_window(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.messages: list[tuple[int, str, dict | None]] = []
+                self.callback_answers: list[tuple[str, str | None]] = []
+
+            def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": len(self.messages)}
+
+            def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": message_id}
+
+            def delete_message(self, chat_id: int, message_id: int) -> dict:
+                return {}
+
+            def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+                self.callback_answers.append((callback_query_id, text))
+                return {}
+
+        class FakeNextcloud:
+            pass
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.data["project_name"] = "Archive Lama"
+            store.save_session(session)
+            store.archive_report(chat_id=1, report_id=session.draft_id or 0)
+            with store._connection() as connection:
+                connection.execute(
+                    "UPDATE drafts SET archived_at = ?, updated_at = ? WHERE id = ?",
+                    ("2026-03-01T00:00:00+00:00", "2026-03-01T00:00:00+00:00", session.draft_id),
+                )
+
+            sessions: dict[int, Session] = {}
+            client = FakeClient()
+
+            _handle_callback_query(
+                client,
+                FakeNextcloud(),
+                store,
+                {
+                    "id": "cb-1",
+                    "data": f"archived:edit:{session.draft_id}",
+                    "message": {"message_id": 44, "chat": {"id": 1}},
+                },
+                sessions,
+                archived_report_retention_days=30,
+            )
+
+            self.assertEqual(client.callback_answers, [("cb-1", "Laporan arkib tidak dijumpai.")])
+            self.assertEqual(client.messages[-1][1], "Laporan arkib itu tidak lagi wujud.")
+            self.assertEqual(sessions, {})
 
     def test_edit_issue_description_prompt_includes_current_value(self) -> None:
         class FakeClient:
@@ -505,6 +566,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 88, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertIn("Semasa: Kabel belum dirapikan", client.messages[-1][1])
@@ -553,6 +615,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 89, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertIn("Semasa: Foto asal", client.messages[-1][1])
@@ -604,6 +667,7 @@ class TelegramBotReviewTest(unittest.TestCase):
                     "message": {"message_id": 77, "chat": {"id": 1}},
                 },
                 sessions,
+                archived_report_retention_days=30,
             )
 
             self.assertEqual(session.issues[0].image_paths, [])
