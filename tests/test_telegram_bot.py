@@ -157,6 +157,10 @@ class TelegramBotReviewTest(unittest.TestCase):
 
     def test_match_author_option(self) -> None:
         self.assertEqual(
+            _match_author_option("AHMAD FARHAN"),
+            ("AHMAD FARHAN", "PROJECT ENGINEER"),
+        )
+        self.assertEqual(
             _match_author_option("KHAIRUL ANUAR JOHARI"),
             ("KHAIRUL ANUAR JOHARI", "TECHNICAL DIRECTOR"),
         )
