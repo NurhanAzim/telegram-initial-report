@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bot_state import Session
+from bot_state import PendingIssue, Session
 from report_generator import Issue, ReportData
 from telegram_bot import (
     AUTHOR_OPTIONS,
@@ -735,6 +735,41 @@ class IssueFlowOrderTest(unittest.TestCase):
             self.assertIn("gambar", last_message.lower())
             # current_issue should have the description stored
             self.assertEqual(session.current_issue.description, "Paip bocor di tingkat 3")
+
+    def test_issue_images_done_transitions_to_images_description_without_finalizing(self) -> None:
+        """After /done on image step, bot should ask for attachment description (butiran isu),
+        and the issue should NOT yet be finalized into session.issues."""
+        from telegram_bot import _handle_issue_images
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images(
+                client, store, session,
+                message={"photo": [{"file_id": "x", "file_size": 100}]},
+                text="/done",
+                max_images_per_issue=5,
+                max_total_images_per_report=20,
+                max_image_file_size_bytes=10 * 1024 * 1024,
+            )
+
+            # Stage should be issue_images_description (butiran isu), NOT more_issues
+            self.assertEqual(session.stage, "issue_images_description")
+            # Issue should NOT be finalized yet — still in current_issue
+            self.assertEqual(len(session.issues), 0)
+            self.assertEqual(session.current_issue.description, "Paip bocor")
+            # Prompt should ask for keterangan lampiran, not "Tambah isu lain?"
+            last_message = client.messages[-1][1]
+            self.assertIn("keterangan lampiran", last_message.lower())
 
 
 if __name__ == "__main__":
