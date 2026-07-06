@@ -826,6 +826,35 @@ class IssueFlowOrderTest(unittest.TestCase):
             self.assertEqual(session.issues[0].images_description, "")
             self.assertEqual(session.stage, "more_issues")
 
+    def test_no_photos_still_asks_for_description(self) -> None:
+        """If user sends /done at image step with zero photos, bot should still
+        transition to issue_images_description and ask for the attachment description."""
+        from telegram_bot import _handle_issue_images
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images"
+            session.current_issue = PendingIssue(description="Paip bocor")
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images(
+                client, store, session,
+                message={"photo": [{"file_id": "x", "file_size": 100}]},
+                text="/done",
+                max_images_per_issue=5,
+                max_total_images_per_report=20,
+                max_image_file_size_bytes=10 * 1024 * 1024,
+            )
+
+            # Should still go to description step even with no photos
+            self.assertEqual(session.stage, "issue_images_description")
+            self.assertEqual(len(session.current_issue.image_paths), 0)
+            last_message = client.messages[-1][1]
+            self.assertIn("keterangan lampiran", last_message.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
