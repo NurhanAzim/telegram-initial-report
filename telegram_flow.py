@@ -142,9 +142,21 @@ def _handle_issue_images_description(client: Any, store: DraftStore, session: Se
     else:
         session.current_issue.images_description = normalized
 
-    session.stage = "issue_images"
+    session.issues.append(
+        Issue(
+            description=session.current_issue.description,
+            images_description=session.current_issue.images_description,
+            image_paths=list(session.current_issue.image_paths),
+        )
+    )
+    session.current_issue = PendingIssue()
+    session.stage = "more_issues"
     store.save_session(session)
-    client.send_message(session.chat_id, "Hantar gambar untuk isu ini satu demi satu. Bila selesai, balas /done.")
+    client.send_message(
+        session.chat_id,
+        "Tambah isu lain?",
+        reply_markup=_yes_no_reply_keyboard(),
+    )
 
 
 def _handle_author_selection(

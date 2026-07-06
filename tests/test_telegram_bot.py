@@ -771,6 +771,61 @@ class IssueFlowOrderTest(unittest.TestCase):
             last_message = client.messages[-1][1]
             self.assertIn("keterangan lampiran", last_message.lower())
 
+    def test_issue_images_description_finalizes_and_transitions_to_more_issues(self) -> None:
+        """After entering attachment description (or /skip), the issue should be finalized
+        and bot should ask 'Tambah isu lain?'"""
+        from telegram_bot import _handle_issue_images_description
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images_description"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                images_description="",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images_description(client, store, session, "Gambar selepas pembaikan")
+
+            # Issue should be finalized into session.issues
+            self.assertEqual(len(session.issues), 1)
+            self.assertEqual(session.issues[0].description, "Paip bocor")
+            self.assertEqual(session.issues[0].images_description, "Gambar selepas pembaikan")
+            # current_issue should be reset
+            self.assertEqual(session.current_issue.description, "")
+            # Stage should be more_issues
+            self.assertEqual(session.stage, "more_issues")
+            # Prompt should ask "Tambah isu lain?" with yes/no keyboard
+            last_message = client.messages[-1]
+            self.assertIn("Tambah isu lain?", last_message[1])
+            self.assertIsNotNone(last_message[2])  # reply_markup (yes/no keyboard)
+
+    def test_issue_images_description_skip_finalizes_with_empty_description(self) -> None:
+        """When user sends /skip at the description step, issue finalizes with empty images_description."""
+        from telegram_bot import _handle_issue_images_description
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images_description"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images_description(client, store, session, "/skip")
+
+            self.assertEqual(len(session.issues), 1)
+            self.assertEqual(session.issues[0].images_description, "")
+            self.assertEqual(session.stage, "more_issues")
+
 
 if __name__ == "__main__":
     unittest.main()
