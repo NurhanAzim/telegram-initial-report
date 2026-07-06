@@ -126,11 +126,11 @@ def _handle_issue_description(
 
     _ensure_persisted_session(store, session)
     session.current_issue = PendingIssue(description=text)
-    session.stage = "issue_images_description"
+    session.stage = "issue_images"
     store.save_session(session)
     client.send_message(
         session.chat_id,
-        "Masukkan keterangan lampiran untuk isu ini jika perlu. Jika tiada, balas /skip.",
+        "Hantar gambar untuk isu ini satu demi satu. Bila selesai, balas /done.",
     )
 
 

@@ -678,5 +678,64 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertFalse(image_path.exists())
             self.assertIn("Tiada gambar lagi untuk isu ini.", client.messages[-1][1])
 
+from telegram_flow import ConversationHooks
+from telegram_bot import _handle_issue_description
+
+
+class IssueFlowOrderTest(unittest.TestCase):
+    """Tests for the reordered issue flow: tambah isu → lampiran → butiran isu."""
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[int, str, dict | None]] = []
+
+        def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": len(self.messages)}
+
+        def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": message_id}
+
+        def delete_message(self, chat_id: int, message_id: int) -> dict:
+            return {}
+
+        def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+            return {}
+
+        def download_file(self, file_id: str, file_path: Path) -> None:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(b"fake-image")
+
+    def _hooks(self) -> ConversationHooks:
+        return ConversationHooks(
+            show_review=lambda *a, **kw: None,
+            dismiss_reply_keyboard=lambda *a, **kw: None,
+        )
+
+    def test_issue_description_transitions_to_issue_images(self) -> None:
+        """After entering issue description, bot should ask for images (lampiran), not description."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_description"
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_description(
+                client, store, session, "Paip bocor di tingkat 3",
+                max_issues_per_report=10, hooks=self._hooks(),
+            )
+
+            # Stage should now be issue_images (lampiran), NOT issue_images_description
+            self.assertEqual(session.stage, "issue_images")
+            # The prompt should mention gambar (images), not keterangan lampiran
+            last_message = client.messages[-1][1]
+            self.assertIn("gambar", last_message.lower())
+            # current_issue should have the description stored
+            self.assertEqual(session.current_issue.description, "Paip bocor di tingkat 3")
+
+
 if __name__ == "__main__":
     unittest.main()
