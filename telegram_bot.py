@@ -186,11 +186,11 @@ def main() -> None:
     if not TEMPLATE_PATH.exists():
         raise SystemExit(f"Template not found: {TEMPLATE_PATH}")
 
-    data_dir = Path(os.getenv("DATA_DIR", "data")).resolve()
-    runtime_dir = Path(os.getenv("RUNTIME_DIR", "runtime")).resolve()
-    db_path = Path(os.getenv("DATABASE_PATH", str(data_dir / "bot.db"))).resolve()
-    drafts_dir = Path(os.getenv("DRAFTS_DIR", str(data_dir / "drafts"))).resolve()
-    backup_dir = Path(os.getenv("BACKUP_DIR", str(data_dir / "backups"))).resolve()
+    data_dir = Path(os.getenv("DATA_DIR", "data"))
+    runtime_dir = Path(os.getenv("RUNTIME_DIR", "runtime"))
+    db_path = Path(os.getenv("DATABASE_PATH", str(data_dir / "bot.db")))
+    drafts_dir = Path(os.getenv("DRAFTS_DIR", str(data_dir / "drafts")))
+    backup_dir = Path(os.getenv("BACKUP_DIR", str(data_dir / "backups")))
     retention_days = int(os.getenv("RETENTION_PERIOD_DAYS", "14"))
     archived_report_retention_days = int(os.getenv("ARCHIVED_REPORT_RETENTION_DAYS", str(ARCHIVED_REPORT_RETENTION_DAYS_DEFAULT)))
     auto_archive_active_report_days = int(

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from bot_state import Session
+from bot_state import PendingIssue, Session
 from report_generator import Issue, ReportData
 from telegram_bot import (
     AUTHOR_OPTIONS,
@@ -677,6 +677,184 @@ class TelegramBotReviewTest(unittest.TestCase):
             self.assertEqual(session.issues[0].image_paths, [])
             self.assertFalse(image_path.exists())
             self.assertIn("Tiada gambar lagi untuk isu ini.", client.messages[-1][1])
+
+from telegram_flow import ConversationHooks
+from telegram_bot import _handle_issue_description
+
+
+class IssueFlowOrderTest(unittest.TestCase):
+    """Tests for the reordered issue flow: tambah isu → lampiran → butiran isu."""
+
+    class _FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[int, str, dict | None]] = []
+
+        def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": len(self.messages)}
+
+        def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+            self.messages.append((chat_id, text, reply_markup))
+            return {"message_id": message_id}
+
+        def delete_message(self, chat_id: int, message_id: int) -> dict:
+            return {}
+
+        def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+            return {}
+
+        def download_file(self, file_id: str, file_path: Path) -> None:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(b"fake-image")
+
+    def _hooks(self) -> ConversationHooks:
+        return ConversationHooks(
+            show_review=lambda *a, **kw: None,
+            dismiss_reply_keyboard=lambda *a, **kw: None,
+        )
+
+    def test_issue_description_transitions_to_issue_images(self) -> None:
+        """After entering issue description, bot should ask for images (lampiran), not description."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_description"
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_description(
+                client, store, session, "Paip bocor di tingkat 3",
+                max_issues_per_report=10, hooks=self._hooks(),
+            )
+
+            # Stage should now be issue_images (lampiran), NOT issue_images_description
+            self.assertEqual(session.stage, "issue_images")
+            # The prompt should mention gambar (images), not keterangan lampiran
+            last_message = client.messages[-1][1]
+            self.assertIn("gambar", last_message.lower())
+            # current_issue should have the description stored
+            self.assertEqual(session.current_issue.description, "Paip bocor di tingkat 3")
+
+    def test_issue_images_done_transitions_to_images_description_without_finalizing(self) -> None:
+        """After /done on image step, bot should ask for attachment description (butiran isu),
+        and the issue should NOT yet be finalized into session.issues."""
+        from telegram_bot import _handle_issue_images
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images(
+                client, store, session,
+                message={"photo": [{"file_id": "x", "file_size": 100}]},
+                text="/done",
+                max_images_per_issue=5,
+                max_total_images_per_report=20,
+                max_image_file_size_bytes=10 * 1024 * 1024,
+            )
+
+            # Stage should be issue_images_description (butiran isu), NOT more_issues
+            self.assertEqual(session.stage, "issue_images_description")
+            # Issue should NOT be finalized yet — still in current_issue
+            self.assertEqual(len(session.issues), 0)
+            self.assertEqual(session.current_issue.description, "Paip bocor")
+            # Prompt should ask for keterangan lampiran, not "Tambah isu lain?"
+            last_message = client.messages[-1][1]
+            self.assertIn("keterangan lampiran", last_message.lower())
+
+    def test_issue_images_description_finalizes_and_transitions_to_more_issues(self) -> None:
+        """After entering attachment description (or /skip), the issue should be finalized
+        and bot should ask 'Tambah isu lain?'"""
+        from telegram_bot import _handle_issue_images_description
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images_description"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                images_description="",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images_description(client, store, session, "Gambar selepas pembaikan")
+
+            # Issue should be finalized into session.issues
+            self.assertEqual(len(session.issues), 1)
+            self.assertEqual(session.issues[0].description, "Paip bocor")
+            self.assertEqual(session.issues[0].images_description, "Gambar selepas pembaikan")
+            # current_issue should be reset
+            self.assertEqual(session.current_issue.description, "")
+            # Stage should be more_issues
+            self.assertEqual(session.stage, "more_issues")
+            # Prompt should ask "Tambah isu lain?" with yes/no keyboard
+            last_message = client.messages[-1]
+            self.assertIn("Tambah isu lain?", last_message[1])
+            self.assertIsNotNone(last_message[2])  # reply_markup (yes/no keyboard)
+
+    def test_issue_images_description_skip_finalizes_with_empty_description(self) -> None:
+        """When user sends /skip at the description step, issue finalizes with empty images_description."""
+        from telegram_bot import _handle_issue_images_description
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images_description"
+            session.current_issue = PendingIssue(
+                description="Paip bocor",
+                image_paths=[root / "fake-img.jpg"],
+            )
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images_description(client, store, session, "/skip")
+
+            self.assertEqual(len(session.issues), 1)
+            self.assertEqual(session.issues[0].images_description, "")
+            self.assertEqual(session.stage, "more_issues")
+
+    def test_no_photos_still_asks_for_description(self) -> None:
+        """If user sends /done at image step with zero photos, bot should still
+        transition to issue_images_description and ask for the attachment description."""
+        from telegram_bot import _handle_issue_images
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.stage = "issue_images"
+            session.current_issue = PendingIssue(description="Paip bocor")
+            store.save_session(session)
+
+            client = self._FakeClient()
+            _handle_issue_images(
+                client, store, session,
+                message={"photo": [{"file_id": "x", "file_size": 100}]},
+                text="/done",
+                max_images_per_issue=5,
+                max_total_images_per_report=20,
+                max_image_file_size_bytes=10 * 1024 * 1024,
+            )
+
+            # Should still go to description step even with no photos
+            self.assertEqual(session.stage, "issue_images_description")
+            self.assertEqual(len(session.current_issue.image_paths), 0)
+            last_message = client.messages[-1][1]
+            self.assertIn("keterangan lampiran", last_message.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
