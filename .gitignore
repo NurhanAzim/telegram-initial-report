@@ -9,3 +9,4 @@ data-staging/
 output/
 __pycache__/
 *.pyc
+.agents
