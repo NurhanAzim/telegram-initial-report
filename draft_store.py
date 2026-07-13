@@ -149,6 +149,23 @@ SCHEMA_MIGRATIONS: list[tuple[str, str]] = [
         ON report_assets(report_id);
         """,
     ),
+    (
+        "004_people",
+        """
+        CREATE TABLE IF NOT EXISTS people (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL
+        );
+        """,
+    ),
+    (
+        "005_people_active",
+        """
+        ALTER TABLE people ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
+        """,
+    ),
 ]
 
 
@@ -676,7 +693,21 @@ class DraftStore:
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=5000")
         return connection
+
+    def list_active_people(self, kind: str | None = None) -> list[tuple[str, str]]:
+        with self._connection() as connection:
+            if kind:
+                rows = connection.execute(
+                    "SELECT name, role FROM people WHERE active = 1 AND kind = ? ORDER BY id",
+                    (kind,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT name, role FROM people WHERE active = 1 ORDER BY id"
+                ).fetchall()
+            return [(row["name"], row["role"]) for row in rows]
 
     @contextmanager
     def _connection(self) -> sqlite3.Connection:

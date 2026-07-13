@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import subprocess
 import time
+import traceback
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
 
 from bot_state import Session
+from control_interface import ControlInterface
 from draft_store import DraftStore
 from nextcloud_client import NextcloudClient, sanitize_filename_part
 from report_generator import ReportData, render_report
@@ -211,6 +214,22 @@ def main() -> None:
     client = TelegramBotClient(token)
     client.set_my_commands()
 
+    interface = ControlInterface(
+        db_path=db_path,
+        drafts_dir=drafts_dir,
+        token=os.getenv("MANAGEMENT_TOKEN", "").strip(),
+        seed_people=list(AUTHOR_OPTIONS),
+        port=int(os.getenv("MGMT_PORT", "8080")),
+        quota_fn=lambda: nextcloud.get_quota(),
+    )
+    interface.start()
+
+    def _handle_sigterm(*_args: object) -> None:
+        interface.stop()
+        raise SystemExit("Received SIGTERM")
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     _run_housekeeping(
         store,
         nextcloud,
@@ -252,7 +271,8 @@ def main() -> None:
                 )
         except KeyboardInterrupt:
             raise
-        except Exception:
+        except Exception as exc:
+            interface.record_error(exc, traceback.format_exc())
             LOGGER.exception("Polling loop failed; retrying shortly.")
             time.sleep(3)
 

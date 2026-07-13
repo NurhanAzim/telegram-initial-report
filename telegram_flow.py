@@ -174,12 +174,15 @@ def _handle_author_selection(
         hooks.show_review(client, store, session)
         return
 
-    match = _match_author_option(normalized)
+    authors = store.list_active_people("author")
+    match = _match_author_option(normalized, authors)
     if match is None:
         client.send_message(
             session.chat_id,
             "Pilih nama menggunakan papan kekunci yang disediakan.",
-            reply_markup=_author_reply_keyboard(back_to_review=session.stage == "edit_author"),
+            reply_markup=_author_reply_keyboard(
+                back_to_review=session.stage == "edit_author", people=authors
+            ),
         )
         return
 

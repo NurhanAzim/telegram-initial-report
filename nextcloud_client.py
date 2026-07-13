@@ -115,6 +115,28 @@ class NextcloudClient:
             share_url=share_url,
         )
 
+    def get_quota(self) -> int | None:
+        """Return used bytes for the authenticated user, or None if unavailable."""
+        response = requests.get(
+            f"{self.base_url}/ocs/v1.php/cloud/users/quota",
+            auth=self.auth,
+            headers=self.share_headers,
+            timeout=30,
+        )
+        if response.status_code != 200:
+            return None
+        try:
+            root = ET.fromstring(response.text)
+        except ET.ParseError:
+            return None
+        used = self._find_text(root, "used")
+        if not used:
+            return None
+        try:
+            return int(used)
+        except ValueError:
+            return None
+
     def _ocs_path(self, remote_path: PurePosixPath) -> str:
         if not remote_path.parts:
             return "/"

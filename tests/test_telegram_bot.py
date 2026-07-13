@@ -166,6 +166,17 @@ class TelegramBotReviewTest(unittest.TestCase):
         )
         self.assertIsNone(_match_author_option("UNKNOWN"))
 
+    def test_author_reply_keyboard_uses_passed_people(self) -> None:
+        keyboard = _author_reply_keyboard(back_to_review=True, people=[("ZED", "DEV")])
+        labels = [row[0]["text"] for row in keyboard["keyboard"][:-1]]
+        self.assertEqual(labels, ["ZED"])
+        self.assertEqual(keyboard["keyboard"][-1][0]["text"], AUTHOR_BACK_LABEL)
+
+    def test_match_author_option_uses_passed_people(self) -> None:
+        self.assertEqual(_match_author_option("ZED", people=[("ZED", "DEV")]), ("ZED", "DEV"))
+        self.assertIsNone(_match_author_option("AHMAD FARHAN", people=[("ZED", "DEV")]))
+
+
     def test_issue_selection_keyboard_uses_numbered_buttons(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session = Session(chat_id=1, workspace=Path(temp_dir))
@@ -854,6 +865,29 @@ class IssueFlowOrderTest(unittest.TestCase):
             self.assertEqual(len(session.current_issue.image_paths), 0)
             last_message = client.messages[-1][1]
             self.assertIn("keterangan lampiran", last_message.lower())
+
+
+class DraftStorePeopleTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        db_path = Path(self.tmp) / "bot.db"
+        self.store = DraftStore(db_path, Path(self.tmp) / "drafts")
+
+    def test_list_active_people_filters_inactive(self) -> None:
+        with self.store._connection() as conn:
+            conn.execute(
+                "INSERT INTO people (name, role, kind, active) VALUES ('A', 'R1', 'author', 1)"
+            )
+            conn.execute(
+                "INSERT INTO people (name, role, kind, active) VALUES ('B', 'R2', 'author', 0)"
+            )
+            conn.execute(
+                "INSERT INTO people (name, role, kind, active) VALUES ('C', 'R3', 'reviewer', 1)"
+            )
+        self.assertEqual(self.store.list_active_people("author"), [("A", "R1")])
+        self.assertEqual(
+            self.store.list_active_people(), [("A", "R1"), ("C", "R3")]
+        )
 
 
 if __name__ == "__main__":

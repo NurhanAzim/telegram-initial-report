@@ -1,0 +1,10 @@
+.env
+.env.staging
+.git
+__pycache__
+*.pyc
+data
+runtime
+.omx
+.codex
+.agents

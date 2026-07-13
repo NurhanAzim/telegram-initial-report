@@ -8,3 +8,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./runtime:/app/runtime
+    networks:
+      - bot-net
+    expose:
+      - "8080"
+
+networks:
+  bot-net:
+    external: true

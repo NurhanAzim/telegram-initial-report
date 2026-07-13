@@ -8,3 +8,13 @@ services:
     volumes:
       - ./data-staging:/app/data-staging
       - ./runtime-staging:/app/runtime-staging
+    networks:
+      - bot-net
+    expose:
+      - "8585"
+    ports:
+      - "127.0.0.1:8585:8585"
+
+networks:
+  bot-net:
+    external: true

@@ -232,7 +232,10 @@ class DraftStoreTest(unittest.TestCase):
             finally:
                 connection.close()
 
-            self.assertEqual([row[0] for row in rows], ["001_init", "002_reports_and_revisions", "003_report_assets"])
+            self.assertEqual(
+                [row[0] for row in rows],
+                ["001_init", "002_reports_and_revisions", "003_report_assets", "004_people", "005_people_active"],
+            )
 
     def test_existing_database_is_backed_up_before_pending_migration(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -290,7 +293,10 @@ class DraftStoreTest(unittest.TestCase):
                 versions = connection.execute("SELECT version FROM schema_migrations ORDER BY version").fetchall()
             finally:
                 connection.close()
-            self.assertEqual([row[0] for row in versions], ["001_init", "002_reports_and_revisions", "003_report_assets"])
+            self.assertEqual(
+                [row[0] for row in versions],
+                ["001_init", "002_reports_and_revisions", "003_report_assets", "004_people", "005_people_active"],
+            )
 
 
 if __name__ == "__main__":
