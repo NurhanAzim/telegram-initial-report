@@ -71,7 +71,9 @@ def _handle_field_input(client: Any, store: DraftStore, session: Session, text: 
         client.send_message(
             session.chat_id,
             "Pilih penyedia laporan:",
-            reply_markup=_author_reply_keyboard(back_to_review=False),
+            reply_markup=_author_reply_keyboard(
+                back_to_review=False, people=store.list_active_people("author")
+            ),
         )
         return
     if key == "date" and not _is_valid_date(text):
@@ -91,7 +93,9 @@ def _handle_field_input(client: Any, store: DraftStore, session: Session, text: 
             client.send_message(
                 session.chat_id,
                 "Pilih penyedia laporan:",
-                reply_markup=_author_reply_keyboard(back_to_review=False),
+                reply_markup=_author_reply_keyboard(
+                    back_to_review=False, people=store.list_active_people("author")
+                ),
             )
         else:
             client.send_message(session.chat_id, _field_prompt(session.field_index))
