@@ -611,7 +611,9 @@ def _handle_callback_query(
             client.send_message(
                 session.chat_id,
                 "Pilih penyedia laporan:",
-                reply_markup=_author_reply_keyboard(back_to_review=True),
+                reply_markup=_author_reply_keyboard(
+                    back_to_review=True, people=store.list_active_people("author")
+                ),
             )
             _set_review_message(
                 client,

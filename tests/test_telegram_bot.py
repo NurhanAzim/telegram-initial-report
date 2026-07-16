@@ -144,7 +144,7 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(keyboard["inline_keyboard"][7][0]["text"], "8. Kesimpulan laporan")
 
     def test_author_reply_keyboard_uses_name_only(self) -> None:
-        keyboard = _author_reply_keyboard(back_to_review=True)
+        keyboard = _author_reply_keyboard(back_to_review=True, people=list(AUTHOR_OPTIONS))
         labels = [row[0]["text"] for row in keyboard["keyboard"][:-1]]
         self.assertEqual(labels, [name for name, _ in AUTHOR_OPTIONS])
         self.assertEqual(keyboard["keyboard"][-1][0]["text"], AUTHOR_BACK_LABEL)
@@ -157,14 +157,14 @@ class TelegramBotReviewTest(unittest.TestCase):
 
     def test_match_author_option(self) -> None:
         self.assertEqual(
-            _match_author_option("AHMAD FARHAN"),
+            _match_author_option("AHMAD FARHAN", list(AUTHOR_OPTIONS)),
             ("AHMAD FARHAN", "PROJECT ENGINEER"),
         )
         self.assertEqual(
-            _match_author_option("KHAIRUL ANUAR JOHARI"),
+            _match_author_option("KHAIRUL ANUAR JOHARI", list(AUTHOR_OPTIONS)),
             ("KHAIRUL ANUAR JOHARI", "TECHNICAL DIRECTOR"),
         )
-        self.assertIsNone(_match_author_option("UNKNOWN"))
+        self.assertIsNone(_match_author_option("UNKNOWN", list(AUTHOR_OPTIONS)))
 
     def test_author_reply_keyboard_uses_passed_people(self) -> None:
         keyboard = _author_reply_keyboard(back_to_review=True, people=[("ZED", "DEV")])

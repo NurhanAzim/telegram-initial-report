@@ -150,8 +150,7 @@ def _field_selection_keyboard() -> dict:
     return {"inline_keyboard": rows}
 
 
-def _author_reply_keyboard(back_to_review: bool, people: list[tuple[str, str]] | None = None) -> dict:
-    people = people if people is not None else AUTHOR_OPTIONS
+def _author_reply_keyboard(back_to_review: bool, people: list[tuple[str, str]]) -> dict:
     rows = [[{"text": name}] for name, _ in people]
     if back_to_review:
         rows.append([{"text": AUTHOR_BACK_LABEL}])
@@ -244,8 +243,7 @@ def _url_button(text: str, url: str) -> dict:
     return {"text": text, "url": url}
 
 
-def _match_author_option(text: str, people: list[tuple[str, str]] | None = None) -> tuple[str, str] | None:
-    people = people if people is not None else AUTHOR_OPTIONS
+def _match_author_option(text: str, people: list[tuple[str, str]]) -> tuple[str, str] | None:
     normalized = text.strip()
     for name, role in people:
         if normalized == name:
