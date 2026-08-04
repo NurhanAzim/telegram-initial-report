@@ -10,7 +10,9 @@ from docx import Document
 from docx.document import Document as DocxDocument
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.image.image import Image as DocxImage
-from docx.shared import Cm
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Inches
 from docx.table import _Cell, Table
 from docx.text.paragraph import Paragraph
 
@@ -96,6 +98,7 @@ def render_report(
     _replace_scalar_placeholders(document, report.placeholder_map())
     if report.report_author == VERIFIER_NAME:
         _remove_verifier_section(document)
+    _ensure_page_number_footer(document)
 
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +147,36 @@ def _replace_placeholder_in_paragraph(paragraph: Paragraph, placeholder: str, va
     paragraph.runs[0].text = merged_text
     for run in paragraph.runs[1:]:
         run.text = ""
+
+
+def _ensure_page_number_footer(document: DocxDocument) -> None:
+    section = document.sections[0]
+    section.footer_distance = Inches(0.5)
+    footer = section.footer
+    for paragraph in list(footer.paragraphs):
+        footer._element.remove(paragraph._element)
+
+    paragraph = footer.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    def add_field(instruction: str) -> None:
+        run = paragraph.add_run()
+        begin = OxmlElement("w:fldChar")
+        begin.set(qn("w:fldCharType"), "begin")
+        instr = OxmlElement("w:instrText")
+        instr.set(qn("xml:space"), "preserve")
+        instr.text = f" {instruction} "
+        separate = OxmlElement("w:fldChar")
+        separate.set(qn("w:fldCharType"), "separate")
+        end = OxmlElement("w:fldChar")
+        end.set(qn("w:fldCharType"), "end")
+        for element in (begin, instr, separate, end):
+            run._r.append(element)
+
+    paragraph.add_run("Page ")
+    add_field("PAGE")
+    paragraph.add_run(" of ")
+    add_field("NUMPAGES")
 
 
 def _remove_verifier_section(document: DocxDocument) -> None:

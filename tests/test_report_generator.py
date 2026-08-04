@@ -9,7 +9,8 @@ from binascii import crc32
 from pathlib import Path
 
 from docx import Document
-from docx.shared import Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Cm, Inches
 
 from nextcloud_client import NextcloudClient, sanitize_filename_part
 from report_generator import Issue, ReportData, render_report
@@ -142,6 +143,39 @@ class ReportGeneratorTest(unittest.TestCase):
             self.assertEqual(len(drawing_paragraphs), 2)
             self.assertEqual(drawing_paragraphs[0]._element.xml.count("<pic:pic>"), 2)
             self.assertEqual(drawing_paragraphs[1]._element.xml.count("<pic:pic>"), 1)
+
+    def test_render_report_adds_page_number_footer(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            template = Path("Template Initial Report.docx")
+            output = temp_path / "rendered-footer.docx"
+
+            report = ReportData(
+                date="16/04/2026",
+                project_name="Projek Demo",
+                project_sub_name="Fasa 1",
+                report_title="Server Room",
+                report_purpose="Pemeriksaan awal",
+                report_action="Tindakan awal dibuat.",
+                report_conclusion="Selesai.",
+                report_author="MUHAMMAD ADAM BIN JAFFRY",
+                report_author_role="DEVOPS ENGINEER",
+                issues=[],
+            )
+
+            render_report(template, output, report)
+            rendered_doc = Document(str(output))
+            footer = rendered_doc.sections[0].footer
+            footer_xml = footer._element.xml
+
+            self.assertFalse(footer.is_linked_to_previous)
+            self.assertEqual(len(footer.paragraphs), 1)
+            self.assertIn("Page", footer.paragraphs[0].text)
+            self.assertIn("of", footer.paragraphs[0].text)
+            self.assertIn("PAGE", footer_xml)
+            self.assertIn("NUMPAGES", footer_xml)
+            self.assertEqual(footer.paragraphs[0].alignment, WD_ALIGN_PARAGRAPH.CENTER)
+            self.assertEqual(rendered_doc.sections[0].footer_distance, Inches(0.5))
 
     def test_render_report_hides_verifier_section_when_author_is_verifier(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
