@@ -96,6 +96,7 @@ def render_report(
         "Tiada isu dalam pemantauan.",
     )
     _replace_scalar_placeholders(document, report.placeholder_map())
+    _normalize_name_label_tabs(document)
     if report.report_author == VERIFIER_NAME:
         _remove_verifier_section(document)
     _ensure_page_number_footer(document)
@@ -147,6 +148,14 @@ def _replace_placeholder_in_paragraph(paragraph: Paragraph, placeholder: str, va
     paragraph.runs[0].text = merged_text
     for run in paragraph.runs[1:]:
         run.text = ""
+
+
+def _normalize_name_label_tabs(document: DocxDocument) -> None:
+    for paragraph in _iter_paragraphs(document):
+        if not paragraph.text.startswith("Nama: "):
+            continue
+        for tab in list(paragraph._element.iter(qn("w:tab"))):
+            tab.getparent().remove(tab)
 
 
 def _ensure_page_number_footer(document: DocxDocument) -> None:
