@@ -297,6 +297,68 @@ class DraftStoreTest(unittest.TestCase):
                 [row[0] for row in versions],
                 ["001_init", "002_reports_and_revisions", "003_report_assets", "004_people", "005_people_active"],
             )
+    def test_peek_next_revision_number_is_one_for_fresh_draft_and_records_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            draft_id = session.draft_id or 0
+
+            self.assertEqual(store.peek_next_revision_number(draft_id), 1)
+            self.assertEqual(store.list_report_revisions(draft_id), [])
+            reports = store.list_reports(chat_id=123)
+            self.assertEqual(reports[0].current_revision, 0)
+    def test_peek_next_revision_number_increments_after_recorded_revision(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            draft_id = session.draft_id or 0
+            store.record_revision(
+                draft_id=draft_id,
+                payload_json="{}",
+                remote_path="InitialReports/report.pdf",
+                share_id="1",
+                share_url="https://cloud.example.com/s/demo",
+            )
+
+            self.assertEqual(store.peek_next_revision_number(draft_id), 2)
+
+    def test_peek_next_revision_number_uses_recorded_count_never_row_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            draft_id = session.draft_id or 0
+            with store._connection() as connection:
+                connection.execute(
+                    "UPDATE drafts SET current_revision = 5 WHERE id = ?",
+                    (draft_id,),
+                )
+
+            self.assertEqual(store.peek_next_revision_number(draft_id), 6)
+
+    def test_peek_next_revision_number_raises_for_missing_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            with self.assertRaises(ValueError):
+                store.peek_next_revision_number(999)
+
+    def test_peek_next_revision_number_returns_same_number_on_repeated_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            draft_id = session.draft_id or 0
+
+            self.assertEqual(store.peek_next_revision_number(draft_id), 1)
+            self.assertEqual(store.peek_next_revision_number(draft_id), 1)
 
 
 if __name__ == "__main__":

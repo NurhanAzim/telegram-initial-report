@@ -445,6 +445,16 @@ class DraftStore:
             )
         return revision_number
 
+    def peek_next_revision_number(self, draft_id: int) -> int:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT current_revision FROM drafts WHERE id = ?",
+                (draft_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Report {draft_id} not found.")
+            return int(row["current_revision"]) + 1
+
     def list_report_revisions(self, draft_id: int, limit: int = 10) -> list[GeneratedFileRecord]:
         with self._connection() as connection:
             rows = connection.execute(
