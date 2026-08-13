@@ -498,7 +498,18 @@ def _handle_callback_query(
     if action == "generate":
         client.answer_callback_query(callback_id, "Menjana PDF...")
         _set_review_message(client, store, session, "Menjana PDF...", None)
-        revision_number = _finish_report(client, nextcloud, store, session)
+        try:
+            revision_number = _finish_report(client, nextcloud, store, session)
+        except Exception:
+            LOGGER.exception("Failed to generate report for draft %s", session.draft_id)
+            _set_review_message(
+                client,
+                store,
+                session,
+                f"Gagal menjana PDF. Sila cuba lagi.\n\n{_review_text(session)}",
+                _review_keyboard(session),
+            )
+            return
         _show_report_revisions(
             client,
             store,

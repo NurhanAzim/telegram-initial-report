@@ -34,6 +34,7 @@ from telegram_bot import (
     _show_report_revisions,
     _yes_no_reply_keyboard,
 )
+from nextcloud_client import ShareInfo
 from draft_store import DraftStore, DraftSummary, GeneratedFileRecord
 
 
@@ -957,6 +958,77 @@ class DraftStorePeopleTest(unittest.TestCase):
         self.assertEqual(
             self.store.list_active_people(), [("A", "R1"), ("C", "R3")]
         )
+    def test_generate_failure_surfaces_error_and_restores_review(self) -> None:
+        class FakeClient:
+            def __init__(self) -> None:
+                self.messages: list[tuple[int, str, dict | None]] = []
+                self.callback_answers: list[tuple[str, str | None]] = []
+
+            def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": len(self.messages)}
+
+            def edit_message_text(self, chat_id: int, message_id: int, text: str, reply_markup: dict | None = None) -> dict:
+                self.messages.append((chat_id, text, reply_markup))
+                return {"message_id": message_id}
+
+            def delete_message(self, chat_id: int, message_id: int) -> dict:
+                return {}
+
+            def answer_callback_query(self, callback_query_id: str, text: str | None = None) -> dict:
+                self.callback_answers.append((callback_query_id, text))
+                return {}
+
+        class FakeNextcloud:
+            def __init__(self) -> None:
+                self.uploads: list[str | None] = []
+
+            def upload_and_share(self, local_path: Path, remote_name: str | None = None) -> ShareInfo:
+                self.uploads.append(remote_name)
+                return ShareInfo(remote_path=remote_name or local_path.name, share_id="1", share_url="https://cloud.example.com/s/x")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.data.update(
+                {
+                    "date": "16/04/2026",
+                    "project_name": "Projek Demo",
+                    "project_sub_name": "Fasa 1",
+                    "report_title": "Bilik Server",
+                    "report_purpose": "Pemeriksaan awal",
+                    "report_action": "Pemeriksaan semula dibuat.",
+                    "report_conclusion": "Selesai.",
+                    "report_author": "MUHAMMAD ADAM BIN JAFFRY",
+                    "report_author_role": "DEVOPS ENGINEER",
+                }
+            )
+            session.review_message_id = 77
+            store.save_session(session)
+            with store._connection() as connection:
+                connection.execute("DELETE FROM drafts WHERE id = ?", (session.draft_id,))
+            sessions = {1: session}
+            client = FakeClient()
+            nextcloud = FakeNextcloud()
+
+            _handle_callback_query(
+                client,
+                nextcloud,
+                store,
+                {
+                    "id": "cb-g",
+                    "data": "review:generate",
+                    "message": {"message_id": 77, "chat": {"id": 1}},
+                },
+                sessions,
+                archived_report_retention_days=30,
+            )
+
+            self.assertIn(1, sessions)
+            self.assertEqual(store.list_report_revisions(session.draft_id or 0), [])
+            self.assertEqual(nextcloud.uploads, [])
+            self.assertIn("Gagal menjana PDF", client.messages[-1][1])
 
 
 if __name__ == "__main__":
