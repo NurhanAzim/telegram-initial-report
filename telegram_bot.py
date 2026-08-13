@@ -795,7 +795,7 @@ def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store:
         issues=session.issues,
     )
 
-    docx_path, pdf_path = _build_output_paths(session.workspace, report)
+    docx_path, pdf_path = _build_output_paths(session.workspace, report, session.draft_id or 0, revision_number)
     render_report(TEMPLATE_PATH, docx_path, report)
     _convert_docx_to_pdf(docx_path, pdf_path)
     share = nextcloud.upload_and_share(pdf_path, pdf_path.name)
@@ -1016,16 +1016,16 @@ def _draft_display_number(store: DraftStore, chat_id: int, draft_id: int | None)
     return None
 
 
-def _build_output_name(report: ReportData, extension: str) -> str:
+def _build_output_name(report: ReportData, draft_id: int, revision_number: int, extension: str) -> str:
     date = sanitize_filename_part(report.date.replace("/", "-"))
     project = sanitize_filename_part(report.project_name)
     sub_project = sanitize_filename_part(report.project_sub_name)
-    return f"initial-report-{date}-{project}-{sub_project}.{extension}"
+    return f"initial-report-{date}-{project}-{sub_project}-d{draft_id}-r{revision_number}.{extension}"
 
 
-def _build_output_paths(workspace: Path, report: ReportData) -> tuple[Path, Path]:
-    docx_path = workspace / _build_output_name(report, "docx")
-    pdf_path = workspace / _build_output_name(report, "pdf")
+def _build_output_paths(workspace: Path, report: ReportData, draft_id: int, revision_number: int) -> tuple[Path, Path]:
+    docx_path = workspace / _build_output_name(report, draft_id, revision_number, "docx")
+    pdf_path = workspace / _build_output_name(report, draft_id, revision_number, "pdf")
     return docx_path, pdf_path
 
 

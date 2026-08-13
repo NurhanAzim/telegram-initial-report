@@ -17,6 +17,7 @@ from telegram_bot import (
     _author_reply_keyboard,
     _archived_reports_keyboard,
     _archived_reports_text,
+    _build_output_name,
     _build_output_paths,
     _drafts_keyboard,
     _drafts_text,
@@ -330,6 +331,24 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(suffix, ".png")
         self.assertEqual(file_size, 456)
 
+    def test_build_output_name_embeds_draft_id_and_revision_unpadded(self) -> None:
+        payload = ReportData(
+            date="16/04/2026",
+            project_name="Projek Demo",
+            project_sub_name="Fasa 1",
+            report_title="Bilik Server",
+            report_purpose="Pemeriksaan awal",
+            report_action="Pemeriksaan semula dibuat.",
+            report_conclusion="Selesai.",
+            report_author="MUHAMMAD ADAM BIN JAFFRY",
+            report_author_role="DEVOPS ENGINEER",
+            issues=[],
+        )
+        self.assertEqual(
+            _build_output_name(payload, 7, 3, "pdf"),
+            "initial-report-16-04-2026-Projek-Demo-Fasa-1-d7-r3.pdf",
+        )
+
     def test_build_output_paths_uses_pdf_and_docx(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             session = Session(chat_id=1, draft_id=7, workspace=Path(temp_dir))
@@ -345,9 +364,32 @@ class TelegramBotReviewTest(unittest.TestCase):
                 report_author_role="DEVOPS ENGINEER",
                 issues=[],
             )
-            docx_path, pdf_path = _build_output_paths(session.workspace, payload)
+            docx_path, pdf_path = _build_output_paths(session.workspace, payload, 7, 3)
             self.assertEqual(docx_path.suffix, ".docx")
             self.assertEqual(pdf_path.suffix, ".pdf")
+            self.assertEqual(docx_path.stem, pdf_path.stem)
+            self.assertIn("-d7-r3", docx_path.stem)
+            self.assertIn("-d7-r3", pdf_path.stem)
+
+    def test_build_output_name_distinguishes_drafts_and_revisions(self) -> None:
+        payload = ReportData(
+            date="16/04/2026",
+            project_name="Projek Demo",
+            project_sub_name="Fasa 1",
+            report_title="Bilik Server",
+            report_purpose="Pemeriksaan awal",
+            report_action="Pemeriksaan semula dibuat.",
+            report_conclusion="Selesai.",
+            report_author="MUHAMMAD ADAM BIN JAFFRY",
+            report_author_role="DEVOPS ENGINEER",
+            issues=[],
+        )
+        names = {
+            _build_output_name(payload, 7, 3, "pdf"),
+            _build_output_name(payload, 8, 3, "pdf"),
+            _build_output_name(payload, 7, 4, "pdf"),
+        }
+        self.assertEqual(len(names), 3)
 
     def test_start_session_is_not_persisted_until_first_real_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
