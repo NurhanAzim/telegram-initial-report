@@ -54,6 +54,7 @@ class DraftStoreTest(unittest.TestCase):
 
             revision_number = store.record_revision(
                 draft_id=session.draft_id or 0,
+                revision_number=1,
                 payload_json="{}",
                 remote_path="InitialReports/report.docx",
                 share_id="55",
@@ -198,6 +199,7 @@ class DraftStoreTest(unittest.TestCase):
             store.save_session(stale_generated)
             store.record_revision(
                 draft_id=stale_generated.draft_id or 0,
+                revision_number=1,
                 payload_json="{}",
                 remote_path="InitialReports/generated.pdf",
                 share_id="1",
@@ -297,6 +299,21 @@ class DraftStoreTest(unittest.TestCase):
                 [row[0] for row in versions],
                 ["001_init", "002_reports_and_revisions", "003_report_assets", "004_people", "005_people_active"],
             )
+    def test_record_revision_raises_for_missing_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            with self.assertRaises(ValueError):
+                store.record_revision(
+                    draft_id=999,
+                    revision_number=1,
+                    payload_json="{}",
+                    remote_path="InitialReports/report.pdf",
+                    share_id=None,
+                    share_url="https://cloud.example.com/s/demo",
+                )
+
     def test_peek_next_revision_number_is_one_for_fresh_draft_and_records_nothing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -318,6 +335,7 @@ class DraftStoreTest(unittest.TestCase):
             draft_id = session.draft_id or 0
             store.record_revision(
                 draft_id=draft_id,
+                revision_number=1,
                 payload_json="{}",
                 remote_path="InitialReports/report.pdf",
                 share_id="1",
@@ -359,6 +377,28 @@ class DraftStoreTest(unittest.TestCase):
 
             self.assertEqual(store.peek_next_revision_number(draft_id), 1)
             self.assertEqual(store.peek_next_revision_number(draft_id), 1)
+    def test_record_revision_stores_passed_number_verbatim_when_it_differs_from_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+
+            session = store.create_report(chat_id=123)
+            draft_id = session.draft_id or 0
+
+            returned = store.record_revision(
+                draft_id=draft_id,
+                revision_number=99,
+                payload_json="{}",
+                remote_path="InitialReports/report.pdf",
+                share_id="1",
+                share_url="https://cloud.example.com/s/demo",
+            )
+
+            self.assertEqual(returned, 99)
+            revisions = store.list_report_revisions(draft_id)
+            self.assertEqual(revisions[0].revision_number, 99)
+            reports = store.list_reports(chat_id=123)
+            self.assertEqual(reports[0].current_revision, 99)
 
 
 if __name__ == "__main__":

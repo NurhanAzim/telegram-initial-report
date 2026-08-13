@@ -781,6 +781,7 @@ def _handle_callback_query(
     _show_review(client, store, session)
 
 def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store: DraftStore, session: Session) -> int:
+    revision_number = store.peek_next_revision_number(session.draft_id or 0)
     report = ReportData(
         date=session.data["date"],
         project_name=session.data["project_name"],
@@ -798,15 +799,16 @@ def _finish_report(client: TelegramBotClient, nextcloud: NextcloudClient, store:
     render_report(TEMPLATE_PATH, docx_path, report)
     _convert_docx_to_pdf(docx_path, pdf_path)
     share = nextcloud.upload_and_share(pdf_path, pdf_path.name)
-    revision_number = store.record_revision(
+    revision_recorded = store.record_revision(
         draft_id=session.draft_id or 0,
+        revision_number=revision_number,
         payload_json=_report_payload_json(report),
         remote_path=share.remote_path,
         share_id=share.share_id,
         share_url=share.share_url,
     )
     _delete_transient_outputs(docx_path, pdf_path)
-    return revision_number
+    return revision_recorded
 
 
 def _cancel_session(

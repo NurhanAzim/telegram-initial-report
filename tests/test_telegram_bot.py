@@ -22,6 +22,7 @@ from telegram_bot import (
     _drafts_text,
     _ensure_persisted_session,
     _field_selection_keyboard,
+    _finish_report,
     _issue_selection_keyboard,
     _match_author_option,
     _parse_callback_data,
@@ -258,6 +259,31 @@ class TelegramBotReviewTest(unittest.TestCase):
         self.assertEqual(keyboard["inline_keyboard"][1][0]["text"], "Revision 1 (luput)")
         self.assertEqual(keyboard["inline_keyboard"][1][0]["callback_data"], "review:expired_revision:1")
 
+    def test_finish_report_peeks_revision_number_before_any_file_work_for_missing_draft(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            store = DraftStore(db_path=root / "bot.db", drafts_dir=root / "drafts")
+            session = store.create_report(chat_id=1)
+            session.data.update(
+                {
+                    "date": "16/04/2026",
+                    "project_name": "Projek Demo",
+                    "project_sub_name": "Fasa 1",
+                    "report_title": "Bilik Server",
+                    "report_purpose": "Pemeriksaan awal",
+                    "report_action": "Pemeriksaan semula dibuat.",
+                    "report_conclusion": "Selesai.",
+                    "report_author": "MUHAMMAD ADAM BIN JAFFRY",
+                    "report_author_role": "DEVOPS ENGINEER",
+                }
+            )
+            store.save_session(session)
+            with store._connection() as connection:
+                connection.execute("DELETE FROM drafts WHERE id = ?", (session.draft_id,))
+
+            with self.assertRaises(ValueError):
+                _finish_report(None, object(), store, session)
+
     def test_show_report_revisions_renders_timestamps_without_name_error(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -273,6 +299,7 @@ class TelegramBotReviewTest(unittest.TestCase):
             store.save_session(session)
             store.record_revision(
                 draft_id=session.draft_id or 0,
+                revision_number=1,
                 payload_json="{}",
                 remote_path="InitialReports/report-1.pdf",
                 share_id="share-1",

@@ -401,18 +401,10 @@ class DraftStore:
         # compatibility no-op: reports remain active after generation
         return
 
-    def record_generated_file(
-        self,
-        draft_id: int,
-        remote_path: str,
-        share_id: str | None,
-        share_url: str,
-    ) -> None:
-        self.record_revision(draft_id=draft_id, payload_json="{}", remote_path=remote_path, share_id=share_id, share_url=share_url)
-
     def record_revision(
         self,
         draft_id: int,
+        revision_number: int,
         payload_json: str,
         remote_path: str,
         share_id: str | None,
@@ -420,13 +412,7 @@ class DraftStore:
     ) -> int:
         now = _now_iso()
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT current_revision FROM drafts WHERE id = ?",
-                (draft_id,),
-            ).fetchone()
-            if row is None:
-                raise ValueError(f"Report {draft_id} not found.")
-            revision_number = int(row["current_revision"]) + 1
+            self._require_draft_row(connection, draft_id)
             connection.execute(
                 """
                 INSERT INTO generated_files (
@@ -447,13 +433,17 @@ class DraftStore:
 
     def peek_next_revision_number(self, draft_id: int) -> int:
         with self._connection() as connection:
-            row = connection.execute(
-                "SELECT current_revision FROM drafts WHERE id = ?",
-                (draft_id,),
-            ).fetchone()
-            if row is None:
-                raise ValueError(f"Report {draft_id} not found.")
+            row = self._require_draft_row(connection, draft_id)
             return int(row["current_revision"]) + 1
+
+    def _require_draft_row(self, connection: sqlite3.Connection, draft_id: int) -> sqlite3.Row:
+        row = connection.execute(
+            "SELECT current_revision FROM drafts WHERE id = ?",
+            (draft_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Report {draft_id} not found.")
+        return row
 
     def list_report_revisions(self, draft_id: int, limit: int = 10) -> list[GeneratedFileRecord]:
         with self._connection() as connection:
